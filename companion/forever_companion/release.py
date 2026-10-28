@@ -26,7 +26,7 @@ FORMAT = 1
 # Public keys whose signatures the app accepts (base64 of the raw 32-byte Ed25519 key).
 # tools/publish_build.py --new-key prints the line to add. The private key never enters the repo.
 TRUSTED_KEYS = [
-    "SvMTMf0Pgjsgr5GwoJiYYB1RiZA9EsNnIKQzIqeIZFo=",     # release key made 2026-10-17, kept on the owner's PC
+    "SvMTMf0Pgjsgr5GwoJiYYB1RiZA9EsNnIKQzIqeIZFo=",     # release key made 2026-10-17
 ]
 
 # What the app can install, and the only AddOns folders each package may write. Set here, in the

@@ -19,7 +19,7 @@ from . import gamelogs, market
 from .release import PACKAGES, TRUSTED_KEYS, ReleaseError
 
 LOGO = Path(__file__).resolve().parents[2] / "assets" / "branding" / "XPCompassLogo-256.png"
-FOLDER_HINT = {"forever": "_classic_beta_", "era": "_classic_era_"}      # for the message about a wrong folder
+FOLDER_HINT = {"forever": "_forever_", "era": "_classic_era_"}      # for the message about a wrong folder
 
 # Kept under their old names for the rest of the app and the tests.
 starts_with_windows = system.starts_at_login

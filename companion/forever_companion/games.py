@@ -1,14 +1,14 @@
 """Find the game client folders on this computer, and say which game each one is.
 
 Battle.net writes `.flavor.info` into each client folder; its second line names the product
-(wow_classic_beta, wow_classic_era, wow for retail). That, not the folder's name and not whether
+(wowf for WoW Forever, wow_classic_beta for its beta, wow_classic_era, wow for retail). That, not the folder's name and not whether
 XPCompass is already in it, says which game a client is. Each game of ours has a list of products;
 the app installs a game's package into the client whose product is on that list, newest product first.
 
-Forever is the beta now and gets its release client on 4 November. When that client's product is
-known, put it at the front of FOREVER's products: a computer that has both then moves to the release
-client (service.Updater says so), and the beta folder's files stay as they are. Era and Retail are
-never a Forever client, whatever they hold.
+Forever's release client is `_forever_`, product wowf (the live game since 28 October); the beta's,
+`_classic_beta_`, comes after it. A computer with both moves to the release client (service.Updater
+says so), and the beta folder's files stay as they are: uninstalling the beta leaves its folder,
+AddOns and all, without its .flavor.info. Era and Retail are never a Forever client, whatever they hold.
 """
 import os
 import sys
@@ -20,7 +20,7 @@ MAC_ROOTS = ("/Applications/World of Warcraft", "~/Applications/World of Warcraf
 ADDONS = ("XPCompass", "ForeverCoachNext")   # the base addon's folder, and its name before 17 October
 
 # For a client folder without a readable .flavor.info: the product its name means.
-FOLDER_PRODUCTS = {"_classic_beta_": "wow_classic_beta", "_classic_era_": "wow_classic_era",
+FOLDER_PRODUCTS = {"_forever_": "wowf", "_classic_beta_": "wow_classic_beta", "_classic_era_": "wow_classic_era",
                    "_classic_": "wow_classic", "_retail_": "wow"}
 
 
@@ -32,7 +32,7 @@ class Game:
     products: tuple      # .flavor.info products that are this game, the newest first
 
 
-FOREVER = Game("forever", "WoW Forever", "forever-coach", ("wow_classic_beta",))   # + the release client's product
+FOREVER = Game("forever", "WoW Forever", "forever-coach", ("wowf", "wow_classic_beta"))   # the live game, then the beta
 ERA = Game("era", "WoW Classic Era", "xpcompass-era", ("wow_classic_era",))
 GAMES = {game.id: game for game in (FOREVER, ERA)}
 

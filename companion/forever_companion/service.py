@@ -133,6 +133,11 @@ class Updater:
         folders, so each would move the other's aside at every check."""
         title = games.GAMES[game_id].title
         chosen = self.settings.chosen(game_id)
+        if chosen and self.outgrown(chosen, game_id):
+            self.settings.choose(game_id, None)         # moved() then says where it installs now
+            if self.settings.path:
+                self.settings.save()
+            chosen = None
         if chosen:
             other = games.other_game(chosen, game_id)
             if other:
@@ -145,6 +150,16 @@ class Updater:
                                if game_id != games.FOREVER.id else
                                "could not tell which game client to use; choose it in the settings")
         return Path(found)
+
+    @staticmethod
+    def outgrown(chosen, game_id):
+        """Whether a folder the player chose for a game should give way to the client the app finds: the
+        chosen one is gone, or it is an older product of the game (WoW Forever's beta, which uninstalling
+        leaves behind) while its newest client (the live game) is here."""
+        found = games.pick(game=game_id)
+        if not found or games.same_folder(found, chosen) or games.product(found) != games.GAMES[game_id].products[0]:
+            return False
+        return not Path(chosen).is_dir() or games.newer(chosen, game_id) is not None
 
     def resolve(self, wanted=None):
         """({game id: client folder}, {game id: why it has none}) for the games in `wanted` (default all).

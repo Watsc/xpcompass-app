@@ -3,7 +3,8 @@
 The source of the XPCompass desktop app for Windows and Mac: the small tray app that installs the
 XPCompass addons into World of Warcraft, keeps them up to date, and sends what the addons record to
 xpcompass.com. This repository is published one way from the project's private repository at each app
-release; each commit is one release. Issues and questions go to the Only Bans Discord.
+release; each commit is one release. Issues and questions go to the Only Bans Discord
+(discord.gg/gXaunYX2bd) or to admin@xpcompass.com.
 
 XPCompass is not made or endorsed by Blizzard Entertainment.
 

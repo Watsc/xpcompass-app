@@ -40,7 +40,7 @@ def main(argv=None):
         commands.add_parser(name)
     for name in ("config", "status", "update", "rollback"):
         sub = commands.add_parser(name)
-        sub.add_argument("--game", help="client folder, e.g. ...\\World of Warcraft\\_classic_beta_")
+        sub.add_argument("--game", help="client folder, e.g. ...\\World of Warcraft\\_forever_")
         if name in ("config", "update"):
             sub.add_argument("--source", help="https base URL or folder holding <package>/manifest.json")
         if name in ("config", "status", "update", "rollback"):
