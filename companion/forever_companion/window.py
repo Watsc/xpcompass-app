@@ -94,16 +94,22 @@ class Window:
         self.native = webview.create_window("XPCompass", html=page(), js_api=Api(app), width=400, height=540,
                                             min_size=(360, 420), hidden=not show, background_color="#14110d")
         self.native.events.closing += self._closing
+        self.visible = bool(show)
 
     def _closing(self):
         if self.app.stopping:
             return True
         self.native.hide()
+        self.visible = False
+        closed = getattr(self.app, "window_closed", None)
+        if closed:
+            closed()            # an update waiting for the window to close can switch now
         return False            # keep running in the tray
 
     def show(self):
         self.native.show()
         self.native.restore()
+        self.visible = True
 
     def create_file_dialog(self, kind):
         return self.native.create_file_dialog(kind)

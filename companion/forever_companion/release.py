@@ -80,10 +80,9 @@ PACKAGES = {
 EDITION_NAMES = {"public": "Starting zones", "members": "Only Bans edition"}
 RETIRED = ("forever-coach-ob", "forever-coach-mail")     # now inside forever-coach's members edition
 
-# Shown in the app's list but not installable yet.
-COMING = {
-    "guild-chronicle": {"name": "Guild Chronicle", "game": "WoW Forever", "about": "Being rebuilt. It appears here when it's ready."},
-}
+# Shown in the app's list but not installable yet. Guild Chronicle was here until the owner took it off
+# the list (21 October); the chronicle itself lives on xpcompass.com/chronicle.
+COMING = {}
 NEVER = ("secret.lua",)
 
 # The app itself is released like a package, as one file, under the same signing key (selfupdate.py):

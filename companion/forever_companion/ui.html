@@ -160,6 +160,7 @@ function card(a, s) {
     ${busy ? `<div class="progress"><div class="bar ${pct == null ? "busy" : ""}"><div style="width:${pct || 0}%"></div></div>
       <div class="small"><span>${a.state === "installing" ? "Installing…" : "Downloading…"}</span><span>${pct == null ? "" : pct + "%"}</span></div></div>` : ""}
     ${a.state === "error" || a.state === "locked" ? `<div class="note">${esc(a.text)}</div>` : ""}
+    ${a.pick ? `<div style="margin-top:6px"><button class="primary" data-act="pick_game" data-id="${a.pick}">Choose folder</button></div>` : ""}
     ${a.upgrade ? `<div class="note gold">${esc(a.upgrade.text)}</div>` : ""}
     <div class="meta">${versionLine(a)}
       ${a.releases && a.releases.length ? ` · <button class="link" data-news="${a.id}">What's new</button>` : ""}</div>

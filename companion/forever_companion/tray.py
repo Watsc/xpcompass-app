@@ -58,7 +58,8 @@ def ago(seconds):
 class Tray:
     """The app: the background updater, the tray icon and the window."""
 
-    def __init__(self, settings=None, show=True, account=None, updater=None, make_window=True, uploader=None):
+    def __init__(self, settings=None, show=True, account=None, updater=None, make_window=True, uploader=None,
+                 updated=False):
         self.settings = settings or service.Settings.load()
         self.account = account or auth.Account(self.settings.server)
         self.updater = updater or service.Updater(self.settings, account=self.account)
@@ -81,13 +82,31 @@ class Tray:
             pystray.MenuItem("Quit", self.quit),
         ))
         welcome = not self.account.session()        # sign-in comes first: no anonymous mode
-        self.window = window.Window(self, show or welcome) if make_window else None
+        # After an update or a reinstall the app comes back in the tray only; the window waits for a click.
+        self.updated = updated
+        self.waiting_switch = None              # a code update in place, waiting for the window to close
+        self.window = window.Window(self, show or (welcome and not updated)) if make_window else None
 
     def run(self):
         threading.Thread(target=self.loop, daemon=True).start()
         threading.Thread(target=self.upload_loop, daemon=True).start()
         self.icon.run_detached()
+        if self.updated:
+            threading.Timer(3, self.say_updated).start()   # once the icon is up to carry it
         window.Window.run()
+
+    def window_closed(self):
+        """The window went to the tray: a code update waiting for that switches now."""
+        if self.waiting_switch:
+            self.wake.set()
+
+    def say_updated(self):
+        """After an update or a reinstall: one small notification naming the version, only when it is a
+        new one (a failed update starts the old app again, which says nothing)."""
+        mine = selfupdate.current() or {}
+        build = mine.get("build")
+        if build and selfupdate.note_build(build):
+            self.notify(f"XPCompass updated to {mine.get('version') or build}.")   # 0.2.2190, as the window shows
 
     def loop(self):
         self.account.recheck()          # the name may have changed since sign-in
@@ -138,6 +157,12 @@ class Tray:
     def update_self(self):
         """Move onto a newer signed build of the app: run its installer, or on a Mac swap the bundle
         and restart into it. True when quitting."""
+        if self.waiting_switch:                 # code already in place: switch once the window is closed
+            if self.window and self.window.visible:
+                return False
+            selfupdate.relaunch(self.waiting_switch)
+            self.quit()
+            return True
         offered, events = self.updater.check_app()
         for event in events:
             self.notify(event.text)
@@ -165,6 +190,12 @@ class Tray:
             self.app_update = None
             self.notify(str(error))
             return False
+        if offered["package"] == release.APP_CODE and self.window and self.window.visible:
+            # The window is open (a new install signing in, or a player looking): the new code is in place
+            # and starts next time; switching now would pull the window away from them.
+            self.app_update = None
+            self.waiting_switch = path
+            return False
         self.notify(f"Updating XPCompass to {offered['build']}.")
         if not setup:
             selfupdate.relaunch(path)
@@ -181,9 +212,12 @@ class Tray:
             game = None
         rows = self.updater.catalog.entries()
         names = {row["id"]: row["name"] for row in rows}
+        clients = self.updater.client_rows()
+        missing = {client["id"] for client in clients if not client["path"]}     # games with no folder to install into
         addons = []
         for row in rows:                    # the server's list for this account, in its order
             info = self.updater.info.get(row["id"], {})
+            client = PACKAGES.get(row["id"], {}).get("client")
             installable = row["status"] == "installable"
             addons.append({
                 "id": row["id"], "name": row["name"], "about": row["about"],
@@ -196,6 +230,7 @@ class Tray:
                 "offered": info.get("offered_version") or info.get("offered"),
                 "build": info.get("offered"), "releases": info.get("releases", []), "notes": info.get("notes", []),
                 "game": row.get("game", "Other"),
+                "pick": client if installable and client in missing else None,     # the card's Choose folder
                 "testing": info.get("channel") == "prerelease" or (not info.get("channel") and row.get("testing", False)),
                 "progress": info.get("progress"), "upgrade": row.get("upgrade"),
                 "edition_name": release.EDITION_NAMES.get(info.get("edition") or row.get("edition") or "")
@@ -210,10 +245,11 @@ class Tray:
             "welcome": not session, "signin": dict(self.signin),
             "addons": addons,
             "checking": self.checking, "checked": checked and ago(time.time() - checked),
-            "game": game, "clients": self.updater.client_rows(), "notices": self.updater.notice_rows(),
+            "game": game, "clients": clients, "notices": self.updater.notice_rows(),
             "start_with_windows": starts_with_windows(), "data_channel": self.settings.data_channel,
             "login_label": "Open at login" if system.MAC else "Start with Windows",
-            "version": (selfupdate.current() or {}).get("build", "dev"),
+            # The readable version (0.2.2190), as the addons show theirs; the build code for older builds.
+            "version": (selfupdate.current() or {}).get("version") or (selfupdate.current() or {}).get("build", "dev"),
         }
 
     def sign_in(self, open_browser=webbrowser.open):
@@ -362,7 +398,10 @@ def main():
         selfupdate.clean_up()
         if (selfupdate.current() or {}).get("kind") in (selfupdate.INSTALLED, selfupdate.CODE):
             settle_install()
-    app = Tray(show="--background" not in sys.argv)
+    updated = "--after-update" in sys.argv
+    if not updated and (selfupdate.current() or {}).get("build"):
+        selfupdate.note_build(selfupdate.current()["build"])      # what an update's notice compares with
+    app = Tray(show="--background" not in sys.argv and not updated, updated=updated)
     selfupdate.mark_good()      # under the launcher: this build came up, so it is kept
     start_with_windows_by_default(app.settings, system.packaged())
     app.run()

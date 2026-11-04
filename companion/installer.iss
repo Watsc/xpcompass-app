@@ -91,7 +91,7 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
 
 [Run]
 Filename: "{app}\{#AppExe}"; Parameters: "--after-update"; Flags: nowait; Check: WizardSilent
-Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Parameters: "{code:LaunchArgs}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; Installers the app downloaded. The settings beside this folder stay.
@@ -106,6 +106,7 @@ const
 
 var
   Installed: Boolean;
+  WasInstalled: Boolean;
 
 { Wait for the running app to quit. A silent update waits on its own, since the app quits right
   after starting it; after a minute it carries on, and CloseApplications closes the app if it still
@@ -132,7 +133,18 @@ end;
 
 function InitializeSetup(): Boolean;
 begin
+  WasInstalled := FileExists(ExpandConstant('{localappdata}\Programs\{#AppName}\{#AppExe}'));
   Result := AppClosed(WizardSilent);
+end;
+
+{ A reinstall over a copy already there starts the app in the tray, as an update does; a first
+  install opens its window. }
+function LaunchArgs(Param: String): String;
+begin
+  if WasInstalled then
+    Result := '--after-update'
+  else
+    Result := '';
 end;
 
 function Locked(const FileName: String): Boolean;

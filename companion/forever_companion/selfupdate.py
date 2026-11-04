@@ -53,7 +53,8 @@ def current():
         from . import _build      # written when the app is packaged
     except ImportError:
         return None
-    return {"build": _build.BUILD, "published": _build.PUBLISHED, "kind": getattr(_build, "KIND", "")}
+    return {"build": _build.BUILD, "published": _build.PUBLISHED, "kind": getattr(_build, "KIND", ""),
+            "version": getattr(_build, "VERSION", "")}
 
 
 def launcher():
@@ -158,6 +159,21 @@ def _put_code(files, build, root):
         shutil.rmtree(part, ignore_errors=True)
         raise ReleaseError(f"could not save the app update ({error}); it carries on as it was") from error
     return Path(sys.executable)
+
+
+def note_build(build, folder=None):
+    """Remember `build` as the last one that ran; True when it differs from the one before."""
+    path = Path(folder or system.data_dir()) / "last-build.txt"
+    try:
+        before = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        before = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(str(build), encoding="utf-8")
+    except OSError:
+        pass
+    return before != str(build)
 
 
 def mark_good(root=None):

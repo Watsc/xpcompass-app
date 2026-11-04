@@ -143,13 +143,11 @@ class Updater:
             other = games.other_game(chosen, game_id)
             if other:
                 raise ReleaseError(f"{chosen} is a {other.title} client, not {title}. "
-                                   f"Choose the {title} folder in Options.")
+                                   f"Choose your {title} folder.")
             return Path(chosen)
         found = games.pick(game=game_id)
         if not found:
-            raise ReleaseError(f"could not find a {title} client; choose its folder in the settings"
-                               if game_id != games.FOREVER.id else
-                               "could not tell which game client to use; choose it in the settings")
+            raise ReleaseError(f"Couldn't find your {title} game. Choose its folder.")
         return Path(found)
 
     @staticmethod
@@ -177,7 +175,7 @@ class Updater:
             if len(sharing) > 1:
                 names = " and ".join(games.GAMES[other].title for other in sharing)
                 for other in sharing:
-                    problems[other] = f"{names} are both set to {folder}. Choose each game's own folder in Options."
+                    problems[other] = f"{names} are both set to {folder}. Choose each game's own folder."
                     folders.pop(other, None)
         return folders, problems
 
