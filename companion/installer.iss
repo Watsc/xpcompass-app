@@ -14,6 +14,9 @@
 #ifndef AppSource
   #error AppSource must name the PyInstaller one-folder build; tools/pack_companion.py passes it
 #endif
+#ifndef CodeSource
+  #error CodeSource must name the app's code for the launcher; tools/pack_companion.py passes it
+#endif
 #ifndef AppBuild
   #define AppBuild "dev"
 #endif
@@ -35,6 +38,12 @@ AppName={#AppName}
 AppVersion={#AppBuild}
 AppVerName={#AppName} {#AppBuild}
 VersionInfoVersion=1.0.{#AppNumber}.0
+VersionInfoCompany=XPCompass
+VersionInfoDescription=XPCompass Setup
+VersionInfoProductName=XPCompass
+VersionInfoProductVersion=1.0.{#AppNumber}.0
+VersionInfoTextVersion={#AppBuild}
+VersionInfoCopyright=Copyright (C) 2026 XPCompass contributors
 AppPublisher={#AppName}
 AppPublisherURL=https://xpcompass.com
 AppSupportURL=https://xpcompass.com/download
@@ -50,8 +59,10 @@ SetupIconFile={#AppIcon}
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 WizardStyle=modern
-Compression=lzma2/max
-SolidCompression=yes
+; Ordinary compression, not one solid block: Microsoft Defender's machine learning flagged the
+; lzma2/max solid setup as Trojan:Win32/Wacatac.C!ml on 29 October, and this one as clean.
+Compression=lzma2/normal
+SolidCompression=no
 SetupMutex=XPCompassSetup
 ; The app has normally quit before the files are replaced (InitializeSetup waits for it). If it
 ; hasn't, a silent update closes it rather than fail on files in use; the setup starts it itself.
@@ -65,8 +76,15 @@ SignedUninstaller=yes
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[InstallDelete]
+; The code a previous setup installed: this one brings its own.
+Type: filesandordirs; Name: "{app}\code"
+
 [Files]
+; The launcher (XPCompass.exe and its _internal folder), and the app's code it starts with. Updates
+; replace only the code, in the app's data folder (companion/xpc_launcher.py).
 Source: "{#AppSource}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#CodeSource}\*"; DestDir: "{app}\code"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
@@ -78,6 +96,8 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 [UninstallDelete]
 ; Installers the app downloaded. The settings beside this folder stay.
 Type: filesandordirs; Name: "{localappdata}\ForeverCoach\updates"
+; And the builds of the app's code that updates brought.
+Type: filesandordirs; Name: "{localappdata}\ForeverCoach\app"
 
 [Code]
 const

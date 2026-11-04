@@ -19,7 +19,9 @@ PRIVACY_LINE = "Please refer to our Privacy Policy and Terms of Use."
 
 
 def page():
-    base = Path(sys._MEIPASS) / "forever_companion" if getattr(sys, "frozen", False) else Path(__file__).parent
+    base = Path(__file__).parent       # the source, or the code the Windows launcher loads
+    if not (base / "ui.html").is_file() and getattr(sys, "frozen", False):
+        base = Path(sys._MEIPASS) / "forever_companion"
     return (base / "ui.html").read_text(encoding="utf-8")
 
 
@@ -81,6 +83,9 @@ class Api:
 
     def toggle_start(self, on):
         self._app.set_start(bool(on))
+
+    def toggle_data(self, on):
+        self._app.set_data_channel(bool(on))
 
 
 class Window:

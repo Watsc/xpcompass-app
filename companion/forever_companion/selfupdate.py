@@ -12,6 +12,12 @@ build (release.py) before anything is run or replaced:
   place, start it and quit. It now carries the migration build (stamped MIGRATE), which takes
   whatever installer build is offered, notes where it ran from, and runs the setup like any update.
   The installed app then deletes that loose .exe and points Start with Windows at itself.
+- <source>/companion-code/ holds the app's code as plain files, for a Windows app the launcher started
+  (companion/xpc_launcher.py): the .exe stays the same and only these files change. The update is
+  checked like every build, unpacked into the launcher's folder of builds beside the one running,
+  and made current in one write of its state.json; the app then starts the launcher again. A build
+  that needs a newer launcher than this one comes by the setup instead. A build that failed to start
+  is on the launcher's bad list and never offered again; mark_good tells the launcher this one is up.
 - <source>/companion-mac/ holds a zip of "XPCompass.app". Unpack the new one with ditto (which keeps
   its links and permissions), rename the running bundle to .old.app, move the new one into place,
   open it and quit.
@@ -34,8 +40,8 @@ from . import release, system
 from .release import APP_FILES, APP_SETUP_FILE, ReleaseError
 
 # How a build was packed (_build.KIND): the installed one-folder app, the one-file migration build,
-# or the Mac bundle.
-INSTALLED, MIGRATE, BUNDLE = "installed", "migrate", "bundle"
+# the Mac bundle, or the code the Windows launcher loads.
+INSTALLED, MIGRATE, BUNDLE, CODE = "installed", "migrate", "bundle", "code"
 RETRY_AFTER = 3600          # seconds before an installer build that did not install is tried again
 SETUP_ARGS = ("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
 OLD_COPIES = "old-copies.json"
@@ -50,15 +56,36 @@ def current():
     return {"build": _build.BUILD, "published": _build.PUBLISHED, "kind": getattr(_build, "KIND", "")}
 
 
+def launcher():
+    """The launcher that started this copy (companion/xpc_launcher.py), or None."""
+    module = sys.modules.get("xpc_launcher")
+    return module if getattr(module, "RUNNING", False) else None
+
+
 def offered(source, mine, keys=None, token=None, package=None):
     """The verified manifest of a newer app build at `source`, or None. The migration build takes
-    any installer build, since it is never the copy a player keeps."""
+    any installer build, since it is never the copy a player keeps. Under the launcher: the newer code,
+    unless it failed to start before or needs a newer launcher, which then comes by the setup."""
     if not mine:
         return None
-    manifest = release.latest(source, package or release.app_package(), keys, token)
+    package = package or release.app_package()
+    manifest = release.latest(source, package, keys, token)
     if mine.get("kind") == MIGRATE:
         return manifest
-    return manifest if manifest["published"] > mine["published"] else None
+    if manifest["published"] <= mine["published"]:
+        return None
+    if package != release.APP_CODE:
+        return manifest
+    running = launcher()
+    if manifest["build"] in read_state().get("bad", []):
+        return None
+    needs = manifest.get("launcher")
+    if not isinstance(needs, int) or needs < 1:
+        raise ReleaseError("the app update does not say which launcher it needs; it was not installed")
+    if needs > getattr(running, "ABI", 0):
+        setup = release.latest(source, release.APP_SETUP, keys, token)
+        return setup if setup["published"] > mine["published"] else None
+    return manifest
 
 
 def pending_dir():
@@ -70,12 +97,89 @@ def apply(source, manifest, target=None, token=None, progress=None):
     """Put the build `manifest` describes in place. `target` is the running .exe, the .app on a Mac,
     or for the installer the folder it is saved in. Returns the path to start."""
     package = manifest["package"]
+    if package == release.APP_CODE:
+        return _put_code(release.download(source, manifest, token, progress), manifest["build"],
+                         Path(target) if target else code_root())
     data = release.download(source, manifest, token, progress)[APP_FILES[package]]
     if package == release.APP_MAC:
         return _swap_bundle(data, Path(target) if target else system.mac_bundle())
     if package == release.APP_SETUP:
         return _save_setup(data, manifest["build"], Path(target) if target else pending_dir())
     return _swap_exe(data, Path(target or sys.executable))
+
+
+def code_root():
+    """Where the launcher keeps the builds of the app's code."""
+    module = sys.modules.get("xpc_launcher")
+    return module.code_root() if module else system.data_dir() / "app"
+
+
+def read_state(root=None):
+    module = sys.modules.get("xpc_launcher")
+    if module:
+        return module.read_state(root or code_root())
+    state = _read_json(Path(root or code_root()) / "state.json")
+    return state if isinstance(state, dict) else {}
+
+
+def _put_code(files, build, root):
+    """Unpack the verified code `files` ({"app/...": bytes}) as the build `build` beside the running one,
+    then make it current. Returns the launcher to start again."""
+    module = launcher()
+    if module is None:
+        raise ReleaseError("only the launcher can take a code update; it was not installed")
+    build = re.sub(r"[^A-Za-z0-9._-]", "", str(build))[:40] or "build"
+    root.mkdir(parents=True, exist_ok=True)
+    part, final = root / f"{build}.part", root / build
+    try:
+        shutil.rmtree(part, ignore_errors=True)
+        for name, data in files.items():
+            relative = Path(*Path(name).parts[1:])        # under app/, checked by release.safe_path
+            path = part / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        info = module.stamp(part)
+        if not info or info["build"] != build:
+            raise ReleaseError("the app update's files don't name its build; it was not installed")
+        state = module.read_state(root)
+        running = getattr(module, "CHOSEN", None) or {}
+        if final.exists():
+            if running.get("build") == build:
+                raise ReleaseError("that build is the one running")
+            shutil.rmtree(final)
+        os.replace(part, final)
+        previous = state.get("current") if state.get("current") != build else state.get("previous")
+        if running.get("build") and running.get("build") != build and Path(running.get("folder", "")).parent == root:
+            previous = running["build"]
+        state.update({"current": build, "previous": previous})
+        state.pop("trying", None)
+        module.write_state(state, root)
+    except OSError as error:
+        shutil.rmtree(part, ignore_errors=True)
+        raise ReleaseError(f"could not save the app update ({error}); it carries on as it was") from error
+    return Path(sys.executable)
+
+
+def mark_good(root=None):
+    """Under the launcher, once the app is up: this build started, so it is kept; builds neither current
+    nor previous are deleted."""
+    module = launcher()
+    if not module or not module.CHOSEN:
+        return
+    root = Path(root or code_root())
+    try:
+        state = module.read_state(root)
+        build = module.CHOSEN["build"]
+        module.remember(state, "good", build)
+        if state.get("trying") == build:
+            state.pop("trying", None)
+        module.write_state(state, root)
+        keep = {state.get("current"), state.get("previous"), build, module.STATE}
+        for folder in root.iterdir() if root.is_dir() else ():
+            if folder.is_dir() and folder.name not in keep:
+                shutil.rmtree(folder, ignore_errors=True)
+    except OSError:
+        pass
 
 
 def _swap_exe(data, exe):

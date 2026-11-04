@@ -63,7 +63,7 @@ class Catalog:
         """The list for the window, in the server's order, with the app's own rules applied."""
         rows = []
         for item in sorted(self.data["packages"], key=lambda item: item.get("order", 0)):
-            if item.get("id") in release.APP_FILES:
+            if item.get("id") in release.APP_PACKAGES:
                 continue
             known = PACKAGES.get(item["id"]) or COMING.get(item["id"]) or {}
             # The app's own short name and game for packages it knows; the server's for new ones.

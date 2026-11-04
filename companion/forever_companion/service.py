@@ -38,10 +38,11 @@ class Settings:
     auto_ticked: list = field(default_factory=list)    # packages the app ticked itself on finding their game, once each
     autostart_set: bool = False         # Start with Windows was turned on once; the player may turn it off
     sharing: bool = True                # False: turned off before sharing was required; no uploads, no updates (uploads.py)
+    data_channel: bool = True           # "Data from the server": the app keeps XPCompass_Data up to date (datachannel.py)
     path: Path = field(default=None, compare=False, repr=False)     # where it is saved; None: settings_path()
 
     KEYS = ("source", "server", "game", "clients", "last_clients", "packages", "auto_ticked",
-            "autostart_set", "sharing")
+            "autostart_set", "sharing", "data_channel")
 
     def chosen(self, game_id):
         """The client folder the player chose for a game (games.py's id), or None. A choice outranks

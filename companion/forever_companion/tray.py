@@ -15,8 +15,9 @@ import pystray
 from PIL import Image, ImageDraw
 
 from . import auth, games, release, selfupdate, service, system, uploads, window
-from . import gamelogs, market
+from . import datachannel, gamelogs, market
 from .release import PACKAGES, TRUSTED_KEYS, ReleaseError
+from . import level_medians
 
 LOGO = Path(__file__).resolve().parents[2] / "assets" / "branding" / "XPCompassLogo-256.png"
 FOLDER_HINT = {"forever": "_forever_", "era": "_classic_era_"}      # for the message about a wrong folder
@@ -62,10 +63,12 @@ class Tray:
         self.account = account or auth.Account(self.settings.server)
         self.updater = updater or service.Updater(self.settings, account=self.account)
         self.uploader = uploader or uploads.Uploader(self.settings, account=self.account)
+        self.data = datachannel.Channel(self.settings, self.uploader)
         self.wake = threading.Event()
         self.upload_wake = threading.Event()
         self.stopping, self.checking = False, False
         self.signin = {"busy": False, "url": None, "error": None}
+        self.medians = level_medians.LevelMedians(self.uploader)   # other players' level times, into the game
         self.cancel = threading.Event()
         self.app_update = None          # {"state", "progress"} while the app replaces itself
         self.held_back = None           # the app build whose failed install was last reported
@@ -111,10 +114,15 @@ class Tray:
             for game_id, folder in self.updater.clients().items():      # no client yet: nothing to look at
                 try:
                     self.uploader.look(folder, game_id)
+                    self.medians.look(folder, game_id)                  # other players' level times, into the game
                     gamelogs.look(self.uploader, folder, game_id)       # the game's load errors and crashes
                     market.look(self.uploader, folder, game_id)         # XPC - Market's auction house scans
                 except Exception as error:   # noqa: BLE001 - an upload problem never stops the app
                     self.uploader.last = {"at": time.time(), "text": f"Upload failed, will try again: {error}"}
+            try:
+                self.data.tick(self.updater.clients())          # data from the server (datachannel.py)
+            except Exception as error:   # noqa: BLE001 - a data problem never stops the app
+                self.data.last = f"Data not updated: {error}"
             self.upload_wake.wait(uploads.LOOK_EVERY)
             self.upload_wake.clear()
 
@@ -203,7 +211,7 @@ class Tray:
             "addons": addons,
             "checking": self.checking, "checked": checked and ago(time.time() - checked),
             "game": game, "clients": self.updater.client_rows(), "notices": self.updater.notice_rows(),
-            "start_with_windows": starts_with_windows(),
+            "start_with_windows": starts_with_windows(), "data_channel": self.settings.data_channel,
             "login_label": "Open at login" if system.MAC else "Start with Windows",
             "version": (selfupdate.current() or {}).get("build", "dev"),
         }
@@ -260,8 +268,8 @@ class Tray:
         the reason, which is also returned. Returns None when the folder was taken."""
         title, clients = games.GAMES[game_id].title, self.updater.clients()
         refusal = None
-        if not (Path(folder) / "Interface" / "AddOns").is_dir():
-            refusal = (f"{folder} has no Interface\\AddOns folder. Pick the client folder, such as "
+        if not games.is_client(folder):
+            refusal = (f"{folder} is not a game client folder. Pick the client folder, such as "
                        f"{FOLDER_HINT[game_id]}.")
         elif games.other_game(folder, game_id):
             refusal = (f"{folder} is a {games.other_game(folder, game_id).title} client, not {title}. "
@@ -302,6 +310,12 @@ class Tray:
 
     def set_start(self, on):
         set_start_with_windows(on)
+
+    def set_data_channel(self, on):
+        """The "Data from the server" setting. Off empties Data.lua at the next look; on asks again."""
+        self.settings.data_channel = bool(on)
+        self.settings.save()
+        self.upload_wake.set()
 
     def open_addons(self, game_id=games.FOREVER.id):
         try:
@@ -346,9 +360,10 @@ def main():
         return 0
     if system.packaged():
         selfupdate.clean_up()
-        if (selfupdate.current() or {}).get("kind") == selfupdate.INSTALLED:
+        if (selfupdate.current() or {}).get("kind") in (selfupdate.INSTALLED, selfupdate.CODE):
             settle_install()
     app = Tray(show="--background" not in sys.argv)
+    selfupdate.mark_good()      # under the launcher: this build came up, so it is kept
     start_with_windows_by_default(app.settings, system.packaged())
     app.run()
     return 0

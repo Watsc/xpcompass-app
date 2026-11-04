@@ -30,7 +30,11 @@ def packaged():
 
 
 def bundled(name, dev_path):
-    """A file packed into the built app, or `dev_path` when run from source."""
+    """A file packed into the built app, or `dev_path` when run from source. Under the Windows launcher
+    the app's files sit beside its code (forever_companion's parent folder)."""
+    beside = Path(__file__).resolve().parent.parent / name
+    if packaged() and beside.is_file():
+        return beside
     return Path(sys._MEIPASS) / name if packaged() else Path(dev_path)
 
 

@@ -50,12 +50,13 @@ PACKAGES = {
         # The folders it had before the renames (17 October) are its too: an install moves them aside,
         # so the old copies stop loading beside the new ones, and a roll back can put them back.
         "folders": ("XPCompass", "XPCompass_HordeGuides", "XPCompass_Mail", "XPCompass_Guild", "XPCompass_Market",
-                    "ForeverCoachNext", "ForeverCoachOB", "ForeverCoachMail", "XPCompass_BankMail"),
+                    "XPCompass_Journey", "ForeverCoachNext", "ForeverCoachOB", "ForeverCoachMail", "XPCompass_BankMail"),
         "renamed": {"ForeverCoachNext": "XPCompass", "ForeverCoachOB": "XPCompass_HordeGuides",
                     "ForeverCoachMail": "XPCompass_Mail", "XPCompass_BankMail": "XPCompass_Mail"},
-        "editions": {"public": ("XPCompass", "XPCompass_Mail", "XPCompass_Guild", "XPCompass_Market"),
+        "editions": {"public": ("XPCompass", "XPCompass_Mail", "XPCompass_Guild", "XPCompass_Market",
+                                "XPCompass_Journey"),
                      "members": ("XPCompass", "XPCompass_HordeGuides", "XPCompass_Mail", "XPCompass_Guild",
-                                 "XPCompass_Market")},
+                                 "XPCompass_Market", "XPCompass_Journey")},
         "needs": (),
     },
     # Classic Era's build: the same addons as Forever's, minus the old names (nothing of Era was ever
@@ -67,10 +68,12 @@ PACKAGES = {
         "game": "WoW Classic Era",
         "client": "era",
         "about": "The leveling guide: quests in route order, with the arrow and map trail.",
-        "folders": ("XPCompass", "XPCompass_HordeGuides", "XPCompass_Mail", "XPCompass_Guild", "XPCompass_Market"),
-        "editions": {"public": ("XPCompass", "XPCompass_Mail", "XPCompass_Guild", "XPCompass_Market"),
+        "folders": ("XPCompass", "XPCompass_HordeGuides", "XPCompass_Mail", "XPCompass_Guild", "XPCompass_Market",
+                    "XPCompass_Journey"),
+        "editions": {"public": ("XPCompass", "XPCompass_Mail", "XPCompass_Guild", "XPCompass_Market",
+                                "XPCompass_Journey"),
                      "members": ("XPCompass", "XPCompass_HordeGuides", "XPCompass_Mail", "XPCompass_Guild",
-                                 "XPCompass_Market")},
+                                 "XPCompass_Market", "XPCompass_Journey")},
         "needs": (),
     },
 }
@@ -99,11 +102,24 @@ APP_MAC = "companion-mac"
 APP_MAC_FILE = "XPCompass-Mac.zip"
 APP_DOWNLOADS = {APP: "XPCompass-Windows", APP_SETUP: "XPCompass-Setup", APP_MAC: "XPCompass-Mac"}  # release zip names
 APP_FILES = {APP: APP_FILE, APP_SETUP: APP_SETUP_FILE, APP_MAC: APP_MAC_FILE}
+# On Windows the setup installs a fixed launcher (companion/xpc_launcher.py), and each release after it
+# is APP_CODE: the app's code as plain files under CODE_ROOT/, which the launcher loads. Only these
+# kinds of file, and its manifest names the launcher it needs ("launcher", xpc_launcher.ABI).
+APP_CODE = "companion-code"
+CODE_ROOT = "app"
+CODE_SUFFIXES = (".py", ".html", ".png")
+APP_PACKAGES = (*APP_FILES, APP_CODE)
 
 
-def app_package():
-    """The app package this computer updates from: the installer on Windows, the .app zip on a Mac."""
-    return APP_MAC if sys.platform == "darwin" else APP_SETUP
+def app_package(launched=None):
+    """The app package this computer updates from: the .app zip on a Mac; on Windows the code, when the
+    launcher started this copy (`launched`, else xpc_launcher's own word), else the installer, which
+    moves an older install onto the launcher."""
+    if sys.platform == "darwin":
+        return APP_MAC
+    if launched is None:
+        launched = bool(getattr(sys.modules.get("xpc_launcher"), "RUNNING", False))
+    return APP_CODE if launched else APP_SETUP
 
 MAX_ZIP = 20_000_000          # bytes downloaded
 MAX_UNPACKED = 40_000_000     # bytes once extracted; the addon budget is 2 MB, so this is generous
@@ -119,7 +135,7 @@ def sha256(data):
 
 
 def folders(package):
-    if package in APP_FILES:
+    if package in APP_PACKAGES:
         return ()
     if package not in PACKAGES:
         raise ReleaseError(f"this app does not know the package {package!r}; update the companion app")
@@ -246,6 +262,12 @@ def verify_manifest(raw, signature, keys=None, package=None):
 def safe_path(name, package):
     """`name` as a relative path inside one of `package`'s folders, or ReleaseError."""
     path = PurePosixPath(name)
+    if package == APP_CODE:
+        if (path.is_absolute() or ".." in path.parts or "\\" in name or ":" in name or len(path.parts) < 2
+                or path.parts[0] != CODE_ROOT or path.suffix.lower() not in CODE_SUFFIXES
+                or any(part.startswith(".") for part in path.parts)):
+            raise ReleaseError(f"refusing {name}: the app's code holds only its own files under {CODE_ROOT}/")
+        return path
     if package in APP_FILES:
         if name != APP_FILES[package]:
             raise ReleaseError(f"refusing {name}: an app build holds only {APP_FILES[package]}")
@@ -272,7 +294,7 @@ def unpack(manifest, zipped):
             if info.filename not in manifest["files"]:
                 raise ReleaseError(f"the zip holds a file the signed build does not list: {info.filename}")
             total += info.file_size
-            if total > (MAX_APP if manifest["package"] in APP_FILES else MAX_UNPACKED):
+            if total > (MAX_APP if manifest["package"] in APP_PACKAGES else MAX_UNPACKED):
                 raise ReleaseError("the build unpacks to more than it should")
             data = bundle.read(info)
             if sha256(data) != manifest["files"][info.filename]:
@@ -294,7 +316,7 @@ def latest(source, package, keys=None, token=None):
 
 def download(source, manifest, token=None, progress=None):
     """The verified files of the build `manifest` describes."""
-    limit = MAX_APP if manifest["package"] in APP_FILES else MAX_ZIP
+    limit = MAX_APP if manifest["package"] in APP_PACKAGES else MAX_ZIP
     return unpack(manifest, fetch(source, f"{manifest['package']}/{manifest['zip']['name']}", limit, token, progress))
 
 

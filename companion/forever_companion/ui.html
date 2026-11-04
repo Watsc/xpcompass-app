@@ -222,6 +222,9 @@ function options(s) {
         ${c.chosen ? `<button class="link" data-act="use_found_client" data-id="${c.id}">Find it automatically</button>` : ""}</div></div>`).join("")}
     <div class="opt"><label class="check"><input type="checkbox" data-act="toggle_start" ${s.start_with_windows ? "checked" : ""}>
       ${esc(s.login_label || "Start with Windows")}</label></div>
+    <div class="opt"><label class="check"><input type="checkbox" data-act="toggle_data" ${s.data_channel ? "checked" : ""}>
+      Data from the server</label>
+      <div class="small">Keeps prices and other data for XPCompass up to date.</div></div>
     <div class="opt small"><button class="link" data-act="open_privacy">Privacy Policy</button>${s.uploaded ? ` · ${esc(s.uploaded)}` : ""}</div>
     ${s.signed_in ? `<div class="opt"><button class="link" data-act="sign_out">Sign out</button></div>` : ""}
     <div class="small">Every part arrives in one download; switch parts on or off in the game's AddOns list.
@@ -309,6 +312,7 @@ document.addEventListener("click", e => {
   if (act === "set_wanted") window.pywebview.api.set_wanted(el.dataset.id, el.dataset.on === "1");
   else if (act === "update_now") window.pywebview.api.update_now(el.dataset.id);
   else if (act === "toggle_start") window.pywebview.api.toggle_start(el.checked);
+  else if (act === "toggle_data") window.pywebview.api.toggle_data(el.checked);
   else window.pywebview.api[act](...(el.dataset.id ? [el.dataset.id] : []));
   setTimeout(refresh, 150);
 });

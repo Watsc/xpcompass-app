@@ -10,6 +10,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import games
 from .release import PACKAGES, ReleaseError, folders, sha256
 
 STATE = ".forever-companion"
@@ -34,9 +35,12 @@ class Result:
                 f"and check {name} is ticked under AddOns at character select.")
 
 
-def addons_dir(game):
-    """The AddOns folder of a client folder such as ..._classic_beta_."""
+def addons_dir(game, make=False):
+    """The AddOns folder of a client folder such as ..._classic_era_. With `make`, a client that has never
+    had an addon (no Interface\\AddOns yet) gets one; a folder that is not a client never does."""
     path = Path(game) / "Interface" / "AddOns"
+    if not path.is_dir() and make and games.is_client(game):
+        path.mkdir(parents=True, exist_ok=True)
     if not path.is_dir():
         raise ReleaseError(f"{game} has no Interface\\AddOns folder; is that the game client folder?")
     return path
@@ -87,7 +91,7 @@ def needs(old, new):
 def install(game, manifest, files, allow_older=False):
     """Install the verified release (release.load) into `game`. Returns a Result."""
     package = manifest["package"]
-    addons, state = addons_dir(game), state_dir(game, package)
+    addons, state = addons_dir(game, make=True), state_dir(game, package)
     old = installed(game, package)
     if old and not allow_older and new_is_older(old, manifest):
         raise ReleaseError(f"the source offers {manifest['build']}, older than the installed {old['build']}; "
