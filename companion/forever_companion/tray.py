@@ -5,6 +5,7 @@ the app at login (--background), and from the tray or menu bar icon. Notices (an
 one waiting for the game to close, a problem) also appear as system notifications, each once.
 What differs between Windows and macOS lives in system.py.
 """
+import os
 import sys
 import threading
 import time
@@ -14,10 +15,12 @@ from pathlib import Path
 import pystray
 from PIL import Image, ImageDraw
 
-from . import auth, games, release, selfupdate, service, system, uploads, window
-from . import datachannel, gamelogs, market
+from . import auth, games, release, selfupdate, service, system, uploads, window, tls
+from . import combatlogs, datachannel, gamelogs, market, sync
 from .release import PACKAGES, TRUSTED_KEYS, ReleaseError
 from . import level_medians
+
+QUIET = 300          # seconds with no click in an open window before a waiting code update switches anyway
 
 LOGO = Path(__file__).resolve().parents[2] / "assets" / "branding" / "XPCompassLogo-256.png"
 FOLDER_HINT = {"forever": "_forever_", "era": "_classic_era_"}      # for the message about a wrong folder
@@ -77,14 +80,15 @@ class Tray:
         self.crest = window.data_uri(Image.open(system.bundled("onlybans-crest.png", Path(__file__).parent / "onlybans-crest.png")))
         self.icon = pystray.Icon("ForeverCoachCompanion", icon_image(), "XPCompass", menu=pystray.Menu(
             pystray.MenuItem("Open XPCompass", lambda: self.window.show(), default=True),
-            pystray.MenuItem("Check now", lambda: self.wake.set()),
+            pystray.MenuItem("Check now", lambda: self.check_now()),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quit", self.quit),
         ))
         welcome = not self.account.session()        # sign-in comes first: no anonymous mode
         # After an update or a reinstall the app comes back in the tray only; the window waits for a click.
         self.updated = updated
-        self.waiting_switch = None              # a code update in place, waiting for the window to close
+        self.waiting_switch = None              # a code update in place, waiting for a safe moment to switch
+        self.touched = 0.0                      # when the player last clicked anything in the window (window.Api)
         self.window = window.Window(self, show or (welcome and not updated)) if make_window else None
 
     def run(self):
@@ -124,8 +128,7 @@ class Tray:
             for event in events:
                 if event.kind != "signin" or self.account.session():
                     self.notify(event.text)
-            self.wake.wait(self.updater.next_delay())
-            self.wake.clear()
+            self.updater.wait(self.wake, lambda: self.stopping)
 
     def upload_loop(self):
         """Every minute: what each game's client recorded since the last look goes to the server (uploads.py)."""
@@ -135,7 +138,9 @@ class Tray:
                     self.uploader.look(folder, game_id)
                     self.medians.look(folder, game_id)                  # other players' level times, into the game
                     gamelogs.look(self.uploader, folder, game_id)       # the game's load errors and crashes
+                    combatlogs.look(self.uploader, folder, game_id)     # the combat log's fights; old logs cleared
                     market.look(self.uploader, folder, game_id)         # XPC - Market's auction house scans
+                    sync.guarded_look(self.uploader, folder, game_id)           # the player's other PCs
                 except Exception as error:   # noqa: BLE001 - an upload problem never stops the app
                     self.uploader.last = {"at": time.time(), "text": f"Upload failed, will try again: {error}"}
             try:
@@ -157,8 +162,8 @@ class Tray:
     def update_self(self):
         """Move onto a newer signed build of the app: run its installer, or on a Mac swap the bundle
         and restart into it. True when quitting."""
-        if self.waiting_switch:                 # code already in place: switch once the window is closed
-            if self.window and self.window.visible:
+        if self.waiting_switch:                 # code already in place: switch at the first safe moment
+            if not self.safe_to_switch():
                 return False
             selfupdate.relaunch(self.waiting_switch)
             self.quit()
@@ -192,7 +197,7 @@ class Tray:
             return False
         if offered["package"] == release.APP_CODE and self.window and self.window.visible:
             # The window is open (a new install signing in, or a player looking): the new code is in place
-            # and starts next time; switching now would pull the window away from them.
+            # and starts at the first safe moment (safe_to_switch); switching now would pull the window away from them.
             self.app_update = None
             self.waiting_switch = path
             return False
@@ -201,6 +206,16 @@ class Tray:
             selfupdate.relaunch(path)
         self.quit()
         return True
+
+    def safe_to_switch(self):
+        """Whether the app may restart into code that is already in place: the window is closed to the tray, or
+        it is open but nobody has clicked in it for QUIET seconds and nothing is being signed in or installed.
+        An open window nobody is using must not hold an update back for days (a laptop left on the page)."""
+        if not (self.window and self.window.visible):
+            return True
+        if self.signin["busy"] or self.app_update:
+            return False
+        return time.time() - self.touched >= QUIET
 
     # What the window shows and does (window.Api calls these).
 
@@ -359,14 +374,44 @@ class Tray:
         except ReleaseError as error:
             self.notify(str(error))
 
+    def check_now(self):
+        """The window's and the tray's Check now: updates, uploads and the other PCs, now. It only woke the update check
+        until 6 November, when the owner pressed it on a laptop that had just come online and nothing synced."""
+        self.uploader.check_now = True
+        self.wake.set()
+        self.upload_wake.set()
+
     def quit(self):
+        """Stop and go. On the owner's PC, 5 November, Quit stopped the loops and the tray icon but the hidden window
+        never closed: the app stayed running with nothing uploading, and a copy opened from the Start menu found it
+        running and went away. So whatever the window does, the app ends within QUIT_GRACE."""
         self.stopping = True
         self.wake.set()
         self.upload_wake.set()
         self.cancel.set()
-        self.icon.stop()
+        end_after(QUIT_GRACE)
+        try:
+            self.icon.stop()
+        except Exception:   # noqa: BLE001 - the app ends anyway
+            pass
         if self.window:
-            self.window.destroy()
+            try:
+                self.window.destroy()
+            except Exception:   # noqa: BLE001 - the app ends anyway
+                pass
+
+
+QUIT_GRACE = 5      # seconds Quit gives the window to close before it ends the app; under the 15 a new copy waits
+
+
+def end_after(wait, end=None):
+    """End this process `wait` seconds from now, unless it has ended by then. It stops the loops where they are, as a
+    Quit that works always has: they are daemon threads, which end with the process."""
+    def run():
+        time.sleep(wait)
+        (end or os._exit)(0)
+
+    threading.Thread(target=run, name="quit-guard", daemon=True).start()
 
 
 def selftest(out):
@@ -389,6 +434,7 @@ def settle_install():
 
 
 def main():
+    tls.install()
     if "--selftest" in sys.argv:
         selftest(sys.argv[sys.argv.index("--selftest") + 1])
         return 0

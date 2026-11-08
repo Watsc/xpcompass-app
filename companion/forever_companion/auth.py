@@ -3,7 +3,8 @@
 The app never sees the Discord password or the server's Discord secret. It opens the player's
 browser at the server, which sends it on to Discord and back to a one-off listener on 127.0.0.1
 with a token. The token is kept in Windows Credential Manager, never in a file, and refreshed
-when it has less than six hours left; each refresh is the server's daily role check.
+when it has less than six hours left. The server keeps the account's roles current; `access` asks it
+what they are now, which reaches only the server, never Discord.
 """
 import base64
 import ctypes
@@ -212,6 +213,19 @@ class Account:
             except AuthError:
                 pass
 
+
+    def access(self):
+        """What the server says this account holds now, {"roles", "prerelease", "every"}, every being how often
+        it is worth asking (None: the server only learns at the daily renewal). None when it can't say."""
+        try:
+            token = self.token()
+            status, body = self.call("GET", "/me", token) if token else (0, {})
+        except AuthError:
+            return None
+        if status != 200:
+            return None
+        return {"roles": sorted(body.get("roles") or []), "prerelease": bool(body.get("prerelease")),
+                "every": body.get("roles_every")}
 
     def call(self, method, path, token):
         """(status, JSON body) of a request to the server, with the token."""

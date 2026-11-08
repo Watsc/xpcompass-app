@@ -14,7 +14,7 @@ settings (config).
 import argparse
 import sys
 
-from . import auth, games, install, release, service
+from . import auth, games, install, release, service, tls
 from .release import PACKAGES, ReleaseError
 
 
@@ -31,6 +31,7 @@ def game_dir(args, settings, package="forever-coach"):
 
 
 def main(argv=None):
+    tls.install()
     parser = argparse.ArgumentParser(prog="forever_companion", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)

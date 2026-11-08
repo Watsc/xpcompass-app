@@ -6,6 +6,7 @@ Closing the window hides it; the app keeps running in the tray until Quit.
 import base64
 import io
 import sys
+import time
 import webbrowser
 from pathlib import Path
 
@@ -31,8 +32,18 @@ def data_uri(image):
     return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+def _acts(method):
+    """A call the player made by clicking: the app notes when, so it knows the window is in use (tray.safe_to_switch)."""
+    def wrapped(self, *args, **kwargs):
+        self._app.touched = time.time()
+        return method(self, *args, **kwargs)
+    wrapped.__name__ = method.__name__
+    return wrapped
+
+
 class Api:
-    """What the page may call. Underscored names are not exposed to it."""
+    """What the page may call. Underscored names are not exposed to it. `state` is the page asking on its own;
+    every other call is a click."""
 
     def __init__(self, app):
         self._app = app
@@ -40,50 +51,65 @@ class Api:
     def state(self):
         return dict(self._app.ui_state(), privacy_line=PRIVACY_LINE)
 
+    @_acts
     def open_privacy(self):
         webbrowser.open(PRIVACY_URL)
 
+    @_acts
     def open_terms(self):
         webbrowser.open(TERMS_URL)
 
+    @_acts
     def sign_in(self):
         self._app.sign_in()
 
+    @_acts
     def reopen_signin(self):
         self._app.reopen_signin()
 
+    @_acts
     def cancel_signin(self):
         self._app.cancel_signin()
 
+    @_acts
     def sign_out(self):
         self._app.sign_out()
 
+    @_acts
     def set_wanted(self, package, on):
         self._app.set_wanted(package, bool(on))
 
+    @_acts
     def check_now(self):
-        self._app.wake.set()
+        self._app.check_now()
 
+    @_acts
     def open_addons(self, game_id="forever"):
         self._app.open_addons(str(game_id))
 
+    @_acts
     def pick_game(self, game_id="forever"):
         chosen = self._app.window.create_file_dialog(webview.FOLDER_DIALOG)
         if chosen:
             self._app.set_game(chosen[0], str(game_id))
 
+    @_acts
     def use_found_client(self, game_id):
         self._app.use_found_client(str(game_id))
 
+    @_acts
     def dismiss_notice(self, game_id):
         self._app.dismiss_notice(str(game_id))
 
+    @_acts
     def update_now(self, package):
         self._app.update_now(str(package))
 
+    @_acts
     def toggle_start(self, on):
         self._app.set_start(bool(on))
 
+    @_acts
     def toggle_data(self, on):
         self._app.set_data_channel(bool(on))
 

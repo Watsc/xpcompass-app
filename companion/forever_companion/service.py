@@ -8,7 +8,8 @@ When to install:
   /reload would mix the old file list with new files; install as soon as the game closes.
 
 Only the manifest (two small files) is fetched on each check; the zip only when there is something
-to install. check_app does the same for the app itself (selfupdate.py).
+to install. check_app does the same for the app itself (selfupdate.py). Between checks the app asks the
+server whether the account's roles changed (wait), so an Only Bans role given or taken shows within a minute.
 """
 import json
 import time
@@ -21,6 +22,20 @@ from .release import PACKAGES, RETIRED, ReleaseError, SignInNeeded
 
 CHECK_EVERY = 15 * 60       # seconds between checks
 WAITING_EVERY = 60          # while a build waits for the game to close
+ASK_AT_LEAST = 15           # seconds: the fastest the server may have the app ask about its roles
+# What the player is told when the account's edition changes. Going to the members edition adds an addon folder,
+# and the game reads the list of addons only when it starts, so a /reload can't load it (install.needs).
+EDITION_NEWS = {
+    "members": {"waiting": "Your account now gets every Horde guide. Close the game to install them, then start it again.",
+                "installed": "Your account now gets every Horde guide. Installed: they load when you start the game.",
+                "running": "Your account now gets every Horde guide. Installed: restart the game fully to load them, "
+                           "a /reload is not enough."},
+    "public": {"waiting": "Your account no longer has Only Bans access. XPCompass goes back to the starting zones "
+               "when you close the game.",
+               "installed": "Your account no longer has Only Bans access. XPCompass is back to the starting zones.",
+               "running": "Your account no longer has Only Bans access. XPCompass goes back to the starting zones "
+                          "when you restart the game."},
+}
 
 
 def settings_path():
@@ -39,10 +54,11 @@ class Settings:
     autostart_set: bool = False         # Start with Windows was turned on once; the player may turn it off
     sharing: bool = True                # False: turned off before sharing was required; no uploads, no updates (uploads.py)
     data_channel: bool = True           # "Data from the server": the app keeps XPCompass_Data up to date (datachannel.py)
+    combat_log_days: int = 7            # combat logs XPCompass caused are kept this many days at least (combatlogs.py)
     path: Path = field(default=None, compare=False, repr=False)     # where it is saved; None: settings_path()
 
     KEYS = ("source", "server", "game", "clients", "last_clients", "packages", "auto_ticked",
-            "autostart_set", "sharing", "data_channel")
+            "autostart_set", "sharing", "data_channel", "combat_log_days")
 
     def chosen(self, game_id):
         """The client folder the player chose for a game (games.py's id), or None. A choice outranks
@@ -127,6 +143,7 @@ class Updater:
         self.status = "Not checked yet"
         self.info = {}               # package -> what the window shows: state, text, builds, notes
         self.checked_at = None
+        self.access = None           # what the server said the account holds at the last check (auth.Account.access)
 
     def game(self, game_id=games.FOREVER.id):
         """The client folder of one game: the player's choice, else the one found by product. A choice
@@ -245,6 +262,39 @@ class Updater:
         testing = any(info.get("channel") == "prerelease" for info in self.info.values())
         return WAITING_EVERY if self.waiting or testing else CHECK_EVERY
 
+    def ask_every(self):
+        """Seconds between questions about the account's roles, as the server says; None when it says not to ask."""
+        every = (self.access or {}).get("every")
+        if not isinstance(every, (int, float)) or isinstance(every, bool):
+            return None
+        return max(ASK_AT_LEAST, every)
+
+    def access_changed(self):
+        """Whether the account holds something other than it did at the last check."""
+        now = self.account.access() if self.account else None
+        if now is None or self.access is None:
+            self.access = self.access or now
+            return False
+        if (now["roles"], now["prerelease"]) == (self.access["roles"], self.access["prerelease"]):
+            self.access = now           # the server may have changed how often to ask
+            return False
+        self.said = {said for said in self.said if said[0] == ""}      # an edition's news can show again
+        self.account.recheck()
+        return True
+
+    def wait(self, wake, stopping=lambda: False):
+        """Until the next check is due: `wake` is set (Check now, a changed setting), the delay is up, or the
+        server says the account's roles changed."""
+        left = self.next_delay()
+        while left > 0 and not stopping():
+            step = min(left, self.ask_every() or left)
+            if wake.wait(step):
+                break
+            left -= step
+            if left > 0 and self.ask_every() and self.access_changed():
+                break
+        wake.clear()
+
     def check(self):
         """One round over every package. Returns the events worth telling the player, each once."""
         events = []
@@ -253,6 +303,8 @@ class Updater:
             return self._once(events, Event("error", "", "No build source set yet."))
         token = self._token(events)
         if self.account:
+            # Asked before the builds are: a change after this shows at the next question, not lost between.
+            self.access = self.account.access() if self.account.session() else None
             self.catalog.refresh(self.account.server, token)
         self.tick_found_games(events)
         wanted = [package for package in self.settings.packages if package in PACKAGES]
@@ -383,9 +435,14 @@ class Updater:
         source = self.settings.active_source()
         offered = release.latest(source, package, self.keys, token)
         current = install.installed(game, package)
-        # Moving between a test build and the release may step back to an older build: the server
-        # decides who is a tester, so that is allowed, once.
-        switching = bool(current) and current.get("channel", "release") != offered.get("channel", "release")
+        # Moving between a test build and the release, or between editions, may step back to an older build:
+        # the server decides who is a tester and who a member, so that is allowed, once. A release's two
+        # editions are stamped moments apart, the public one first.
+        same_channel = (current or {}).get("channel", "release") == offered.get("channel", "release")
+        was, now = (current or {}).get("edition"), offered.get("edition")
+        moved_edition = bool(was and now and was != now)
+        news = EDITION_NEWS.get(now) if moved_edition and same_channel else None
+        switching = bool(current) and (not same_channel or moved_edition)
         if current and not switching and install.new_is_older(current, offered):
             self._note(package, "current", f"Up to date ({current['build']}, newer than the server's).",
                        current, offered)
@@ -402,9 +459,10 @@ class Updater:
         self.forced.discard(package)
         if need == "restart" and current and self.running() and not forced:
             self.waiting[package] = offered["build"]
-            self._note(package, "waiting", "Update ready. It installs when you close the game.", current, offered)
-            self._once(events, Event("waiting", package, f"{name} {offered['build']} is ready. "
-                                                          f"It installs when you close the game."))
+            self._note(package, "waiting", news["waiting"] if news else "Update ready. It installs when you close the game.",
+                       current, offered)
+            self._once(events, Event("waiting", package, news["waiting"] if news else
+                                     f"{name} {offered['build']} is ready. It installs when you close the game."))
             return f"{name} {offered['build']} waits for the game to close"
         def progress(done, total):
             self._note(package, "downloading", f"Downloading… {done * 100 // total}%" if total else "Downloading…",
@@ -417,12 +475,14 @@ class Updater:
         result = install.install(game, offered, files, allow_older=switching)
         self.info[package].pop("progress", None)
         self.waiting.pop(package, None)
-        if not self.running() and result.needs != "nothing":
+        if news:
+            text = news["running" if self.running() else "installed"]
+        elif not self.running() and result.needs != "nothing":
             text = f"{name} updated to {result.build}. It loads next time you start the game."
         else:
             text = result.advice()
         events.append(Event("installed", package, text))
-        short = text.replace(f"{name} ", "", 1)
+        short = text if news else text.replace(f"{name} ", "", 1)
         self._note(package, "installed", short[:1].upper() + short[1:], install.installed(game, package), offered)
         return f"{name} {result.build}, installed"
 

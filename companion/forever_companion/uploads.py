@@ -10,7 +10,8 @@ with Discord: there is no anonymous mode, and until then the rows wait in the ga
 
 - **Who.** The app makes a random install id once (uploads.json in its data folder) and sends it
   with every upload, beside the Discord token. Each saved file gets its own random
-  "slot" id. No account, realm or character name, and no path, ever leaves the computer.
+  "slot" id. No account, realm or character name, and no path, ever leaves the computer with these
+  rows. The copy for a player's other PCs (sync.py) is its own thing, read only by their own apps.
 - **Sharing.** Required to receive updates (DECISIONS.md), with no switch left in the game or the
   app. A player who turned it off before the switches went stays off: their saved file says so, or
   the app's settings do. Then nothing is sent, the server is told once (POST /sharing) so nothing
