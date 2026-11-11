@@ -54,6 +54,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from . import tls
 from pathlib import Path
 
 from . import auth, uploads
@@ -64,7 +66,7 @@ MARKET_DB, MAIL_DB, PEERS_TABLE = "ForeverCoachMarketDB", "ForeverCoachMailDB", 
 JOURNEY_FILE, CHARACTER_DB, JOURNEY_DB = "XPCompass_Journey.lua", uploads.CHARACTER_DB, "XPCompassJourneyDB"
 PLAY_PEERS = "XPCompassPlayPeers"       # in each character's XPCompass.lua: the other PCs' play of it
 GOLD = "#gold"
-KINDS = ("sales", "buys", "back")
+KINDS = ("sales", "buys", "back", "vendor", "fees")
 
 # A character's play, field by field (addon/XPCompass/Play.lua holds the same lists; the tests hold them equal).
 # Where you are: from the PC the character was played on last.
@@ -208,18 +210,20 @@ def _value(value, depth=0):
 
 
 def _row(row):
-    if not isinstance(row, dict) or set(row) - {"t", "name", "item", "n", "each", "why"}:
+    if not isinstance(row, dict) or set(row) - {"t", "name", "item", "n", "each", "why", "with"}:
         return False
     return (whole(row.get("t"), 0, 2 ** 33) and isinstance(row.get("name"), str) and bool(TEXT.match(row["name"]))
             and whole(row.get("n"), 0, 100_000)
             and (row.get("item") is None or whole(row["item"], 0, 10 ** 9))
             and (row.get("each") is None or whole(row["each"], 0, COPPER))
-            and (row.get("why") is None or (isinstance(row["why"], str) and bool(TEXT.match(row["why"])))))
+            and all(row.get(field) is None or (isinstance(row[field], str) and len(row[field]) <= 200 and bool(TEXT.match(row[field])))
+                    for field in ("why", "with")))
 
 
 # An auction record (addon/XPCompass_Market/Ledger.lua): its post and how it ended. The app's own list (tests hold them equal).
-AUCTION_FIELDS = ("t", "name", "item", "n", "each", "dep", "dur", "p", "o", "ot", "cut", "net", "why", "under", "lost", "x")
+AUCTION_FIELDS = ("t", "name", "item", "n", "each", "dep", "dur", "p", "o", "ot", "cut", "net", "why", "under", "lost", "x", "uid", "post")
 AUCTION_OUTCOMES = ("up", "sold", "expired", "cancelled", "failed")
+AUCTION_ID = re.compile(r"[A-Za-z0-9_:-]{1,96}\Z")
 
 
 def _auction(row):
@@ -228,6 +232,9 @@ def _auction(row):
     if not (whole(row.get("t"), 0, 2 ** 33) and isinstance(row.get("name"), str) and TEXT.match(row["name"]) and row.get("o") in AUCTION_OUTCOMES):
         return False
     if row.get("why") is not None and not (isinstance(row["why"], str) and TEXT.match(row["why"])):
+        return False
+    if any(row.get(field) is not None and not (isinstance(row[field], str) and AUCTION_ID.fullmatch(row[field]))
+           for field in ("uid", "post")):
         return False
     for field in ("item", "n", "each", "dep", "dur", "ot", "cut", "net", "under", "lost", "x"):
         if row.get(field) is not None and not whole(row[field], 0, COPPER):
@@ -425,8 +432,9 @@ def _clean_row(row):
         out["item"] = _digits(row["item"])
     if _digits(row.get("each")) is not None:
         out["each"] = _digits(row["each"])
-    if isinstance(row.get("why"), str):
-        out["why"] = row["why"]
+    for field in ("why", "with"):
+        if isinstance(row.get(field), str):
+            out[field] = row[field]
     return out if _row(out) else None
 
 
@@ -434,7 +442,7 @@ def _clean_auction(row):
     out = {}
     for field in AUCTION_FIELDS:
         value = row.get(field)
-        if field in ("name", "o", "why"):
+        if field in ("name", "o", "why", "uid", "post"):
             if isinstance(value, str):
                 out[field] = value
         elif field == "p":
@@ -467,7 +475,8 @@ def _clean_book(book, days_most=MOST_DAYS, rows_most=MOST_RECORDS):
     for kind in KINDS:
         rows = book.get(kind) if isinstance(book.get(kind), list) else []
         good = [clean for clean in (_clean_row(row) for row in rows if isinstance(row, dict)) if clean]
-        out[kind] = good[-rows_most:] if rows_most else []
+        if good or kind in ("sales", "buys", "back"):
+            out[kind] = good[-rows_most:] if rows_most else []
     rows = book.get("auctions") if isinstance(book.get("auctions"), list) else []
     good = [clean for clean in (_clean_auction(row) for row in rows if isinstance(row, dict)) if clean]
     if good:
@@ -735,11 +744,10 @@ def _merge_book(into, book):
             if row.get("gt") is not None:
                 have["gt"] = row["gt"]
     for kind in KINDS:
-        rows = {_row_key(row): row for row in into.get(kind, []) + book.get(kind, [])}
-        into[kind] = sorted(rows.values(), key=lambda row: (row["t"], str(_row_key(row))))[-MOST_RECORDS:]
-    rows = {_auction_key(row): row for row in into.get("auctions", []) + book.get("auctions", [])}
+        into[kind] = _merged_rows([into.get(kind, []), book.get(kind, [])])
+    rows = _merged_rows([into.get("auctions", []), book.get("auctions", [])], auction=True)
     if rows:
-        into["auctions"] = sorted(rows.values(), key=lambda row: (row["t"], str(_auction_key(row))))[-MOST_RECORDS:]
+        into["auctions"] = rows
     return into
 
 
@@ -897,11 +905,52 @@ def _pairs(side):
 
 
 def _row_key(row):
-    return (row.get("t"), row.get("name"), row.get("item"), row.get("n"), row.get("each"), row.get("why"))
+    return (row.get("t"), row.get("name"), row.get("item"), row.get("n"), row.get("each"), row.get("why"), row.get("with"))
 
 
 def _auction_key(row):
     return tuple(row.get(field) for field in AUCTION_FIELDS)
+
+
+def _auction_rank(row):
+    terminal = row.get("o") != "up"
+    return (int(terminal), row.get("ot", 0) if terminal else 0, -(row.get("n") or 0),
+            "\t".join(_empty(row.get(field)) for field in AUCTION_FIELDS))
+
+
+def _merged_rows(groups, own=(), auction=False):
+    """UIDs represent lifecycles; legacy rows retain the largest observed multiplicity.
+
+    Send the full multiplicity when another copy has more rows than the local
+    one: the addon's union takes the maximum, rather than adding the copies.
+    Newer versions of a UID advance a local posting to its outcome.
+    """
+    from collections import Counter
+    key_of = _auction_key if auction else _row_key
+    counts, examples, identified = Counter(), {}, {}
+    for group in groups:
+        seen = Counter()
+        for row in group:
+            uid = row.get("uid") if auction else None
+            if uid:
+                if uid not in identified or _auction_rank(row) > _auction_rank(identified[uid]):
+                    identified[uid] = row
+            else:
+                key = key_of(row)
+                seen[key] += 1
+                examples[key] = row
+        counts |= seen
+    held = Counter()
+    for row in own:
+        uid = row.get("uid") if auction else None
+        if uid:
+            if uid in identified and _auction_rank(row) >= _auction_rank(identified[uid]):
+                del identified[uid]
+        else:
+            held[key_of(row)] += 1
+    rows = [row for key, count in counts.items() if count > held[key] for row in [examples[key]] * count]
+    rows.extend(identified.values())
+    return sorted(rows, key=lambda row: (row["t"], str(key_of(row))))[-MOST_RECORDS:]
 
 
 def _empty(value):
@@ -928,23 +977,11 @@ def _book_lines(key, books, own_book, now):
     out = {"days": "\n".join(f"{day}\t{_empty(row.get('g'))}\t{_empty(row.get('gt'))}\t{_pairs(row['e'])}\t{_pairs(row['s'])}"
                              for day, row in sorted(days.items()))}
     for kind in KINDS:
-        held = {_row_key(row) for row in own_book.get(kind, []) if isinstance(row, dict)} if own_book else set()
-        rows = {}
-        for book in books:
-            for row in book.get(kind, []):
-                if _row_key(row) not in held:
-                    rows[_row_key(row)] = row
-        ordered = sorted(rows.values(), key=lambda row: (row["t"], str(_row_key(row))))[-MOST_RECORDS:]
+        ordered = _merged_rows([book.get(kind, []) for book in books], (own_book or {}).get(kind, []))
         out[kind] = "\n".join("\t".join((str(row["t"]), row["name"], _empty(row.get("item")), _empty(row.get("n")),
-                                         _empty(row.get("each")), _empty(row.get("why")))) for row in ordered)
+                                         _empty(row.get("each")), _empty(row.get("why")), _empty(row.get("with")))) for row in ordered)
     # The auction records: each one's fields in Ledger.lua's order (AUCTION_FIELDS), a tab between.
-    held = {_auction_key(row) for row in own_book.get("auctions", []) if isinstance(row, dict)} if own_book else set()
-    rows = {}
-    for book in books:
-        for row in book.get("auctions", []):
-            if _auction_key(row) not in held:
-                rows[_auction_key(row)] = row
-    ordered = sorted(rows.values(), key=lambda row: (row["t"], str(_auction_key(row))))[-MOST_RECORDS:]
+    ordered = _merged_rows([book.get("auctions", []) for book in books], (own_book or {}).get("auctions", []), auction=True)
     out["auctions"] = "\n".join("\t".join(_empty(row.get(field)) for field in AUCTION_FIELDS) for row in ordered)
     return {name: text for name, text in out.items() if text}
 
@@ -1474,7 +1511,7 @@ class Sync:
         return status, answer
 
     def _send(self, game_id, scope, copy, off=False):
-        payload = {"v": 1, "game": game_id, "scope": scope, "copy": copy}
+        payload = {"v": 2, "game": game_id, "scope": scope, "copy": copy}
         if off:
             payload["off"] = True       # the switch is off here: this install's copy goes
         data = gzip.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
@@ -1498,7 +1535,7 @@ class Sync:
         return listed
 
     def _fetch_copy(self, game_id, scope, copy_id):
-        query = urllib.parse.urlencode({"game": game_id, "scope": scope, "id": copy_id})
+        query = urllib.parse.urlencode({"game": game_id, "scope": scope, "id": copy_id, "details": 2})
         status, raw = self._authorised(lambda token: self.fetch(f"/sync/copy?{query}", token))
         if status != 200:
             raise uploads.UploadError(f"{status}")
@@ -1511,7 +1548,7 @@ class Sync:
             headers["Authorization"] = f"Bearer {token}"
         request = urllib.request.Request(server + path, method="GET", headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with tls.urlopen(request, timeout=60) as response:
                 return response.status, response.read(MOST_PACKED + 200_000)
         except urllib.error.HTTPError as error:
             return error.code, error.read(10_000)

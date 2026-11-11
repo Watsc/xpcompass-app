@@ -15,6 +15,8 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from . import channels, tls
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -167,7 +169,7 @@ def _download(url, headers, limit, name, progress=None):
     for _ in range(TRIES):
         wanted = dict(headers, **({"Range": f"bytes={len(data)}-"} if data else {}))
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=wanted), timeout=30) as response:
+            with tls.urlopen(urllib.request.Request(url, headers=wanted), timeout=30) as response:
                 if data and response.status != 206:
                     data = bytearray()
                 total = len(data) + int(response.headers.get("Content-Length") or 0)
@@ -198,7 +200,14 @@ def fetch(source, name, limit=MAX_ZIP, token=None, progress=None):
     if str(source).startswith(("http://", "https://")):
         if not (str(source).startswith("https://") or local(source)):
             raise ReleaseError("the build source must use https")
-        url = urllib.parse.urljoin(str(source).rstrip("/") + "/", name)
+        base = urllib.parse.urlsplit(str(source))
+        url = urllib.parse.urljoin(urllib.parse.urlunsplit(base._replace(query="", fragment="")).rstrip("/") + "/", name)
+        target = urllib.parse.urlsplit(url)
+        if tls.origin(url) != tls.origin(str(source)):
+            raise ReleaseError("a build file must remain on its source origin")
+        query = dict(urllib.parse.parse_qsl(base.query))
+        query.update(urllib.parse.parse_qsl(target.query))
+        url = urllib.parse.urlunsplit(target._replace(query=urllib.parse.urlencode(query)))
         headers = {"User-Agent": "ForeverCoachCompanion"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -309,14 +318,22 @@ def latest(source, package, keys=None, token=None):
     """The verified manifest of `package`'s newest build at `source`: two small files, no zip."""
     folders(package)
     raw = fetch(source, f"{package}/manifest.json", 1_000_000, token)
-    signature = fetch(source, f"{package}/manifest.sig", 10_000, token).decode("ascii", "replace")
-    return verify_manifest(raw, signature, keys, package)
+    pin = "?manifest=" + sha256(raw) if str(source).startswith(("http://", "https://")) else ""
+    signature = fetch(source, f"{package}/manifest.sig{pin}", 10_000, token).decode("ascii", "replace")
+    manifest = verify_manifest(raw, signature, keys, package)
+    requested = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(str(source)).query)).get("channel")
+    if requested is not None and channels.canonical(manifest.get("channel")) != channels.canonical(requested):
+        raise ReleaseError("the server did not offer the selected build channel; nothing was installed")
+    manifest["manifest_sha256"] = sha256(raw)
+    return manifest
 
 
 def download(source, manifest, token=None, progress=None):
     """The verified files of the build `manifest` describes."""
     limit = MAX_APP if manifest["package"] in APP_PACKAGES else MAX_ZIP
-    return unpack(manifest, fetch(source, f"{manifest['package']}/{manifest['zip']['name']}", limit, token, progress))
+    pin = ("?manifest=" + manifest["manifest_sha256"]
+           if manifest.get("manifest_sha256") and str(source).startswith(("http://", "https://")) else "")
+    return unpack(manifest, fetch(source, f"{manifest['package']}/{manifest['zip']['name']}{pin}", limit, token, progress))
 
 
 def load(source, package, keys=None, token=None):

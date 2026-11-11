@@ -110,6 +110,10 @@ class Api:
         self._app.use_release(str(package))
 
     @_acts
+    def set_channel(self, channel):
+        self._app.set_channel(str(channel))
+
+    @_acts
     def toggle_start(self, on):
         self._app.set_start(bool(on))
 

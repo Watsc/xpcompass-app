@@ -90,11 +90,15 @@ def clean(game, keep_days=KEEP_DAYS, state=None, now=None, remove=None):
     deleted = []
     for path in sorted((Path(game) / "Logs").glob(PATTERN)):
         try:
-            written = path.stat().st_mtime
+            stat = path.stat()
+            written = stat.st_mtime
         except OSError:
             continue
         start = began(path)
-        if now - written <= keep_days * 86400 or path.name not in summarised or start is None:
+        entry = ((state or {}).get("read") or {}).get(path.name, {})
+        acknowledged = ("last_id" in entry and entry["last_id"] <= (state or {}).get("acked", -1)
+                        and entry.get("to") == stat.st_size)
+        if now - written <= keep_days * 86400 or path.name not in summarised or start is None or not acknowledged:
             continue
         if not any(abs(session["at"] - start) <= MATCH for session in noted):
             continue
@@ -106,13 +110,15 @@ def clean(game, keep_days=KEEP_DAYS, state=None, now=None, remove=None):
     return deleted
 
 
-def clean_copies(folder, keep_days=KEEP_DAYS, now=None):
-    """Delete the app's own small copies older than keep_days; the names deleted."""
+def clean_copies(folder, keep_days=KEEP_DAYS, now=None, state=None):
+    """Delete old app copies only after their source log's summaries were acknowledged."""
     now = time.time() if now is None else now
     if not isinstance(keep_days, (int, float)) or keep_days <= 0:
         return []
     deleted = []
     for path in sorted(Path(folder).glob("*.gz")):
+        if path.stem + ".txt" not in ((state or {}).get("summarised") or {}):
+            continue
         try:
             if now - path.stat().st_mtime > keep_days * 86400:
                 path.unlink()
@@ -127,5 +133,6 @@ def look(uploader, game, game_id="forever"):
     from . import combatread
     combatread.look(uploader, uploader.settings, game, game_id)
     keep = getattr(uploader.settings, "combat_log_days", KEEP_DAYS)
-    clean_copies(uploader.combat_logs[game_id].copies, keep)
-    return clean(game, keep, read_state(state_path(game_id)))
+    state = uploader.combat_logs[game_id].state
+    clean_copies(uploader.combat_logs[game_id].copies, keep, state=state)
+    return clean(game, keep, state)

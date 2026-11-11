@@ -21,6 +21,8 @@ import os
 import time
 import urllib.error
 import urllib.request
+
+from . import tls
 from pathlib import Path
 
 from . import auth, system
@@ -134,7 +136,7 @@ class LevelMedians:
             headers["Authorization"] = f"Bearer {token}"
         request = urllib.request.Request(self.settings.server + path, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with tls.urlopen(request, timeout=60) as response:
                 status, raw = response.status, response.read(1_000_000)
         except urllib.error.HTTPError as error:
             status, raw = error.code, error.read(100_000)

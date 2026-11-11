@@ -17,11 +17,12 @@ to install. check_app does the same for the app itself (selfupdate.py). Between 
 server whether the account's roles changed (wait), so an Only Bans role given or taken shows within a minute.
 """
 import json
+import hashlib
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import auth, games, install, linking, release, selfupdate, system, uploads
+from . import auth, channels, games, install, linking, release, selfupdate, system, uploads
 from .catalog import Catalog
 from .release import PACKAGES, RETIRED, ReleaseError, SignInNeeded
 
@@ -38,8 +39,8 @@ EDITION_NEWS = {
                 "installed": "Your account now gets every Horde guide. Installed: they load when you start the game.",
                 "running": "Your account now gets every Horde guide. Installed: restart the game fully to load them, "
                            "a /reload is not enough."},
-    "public": {"waiting": "Your account no longer has Only Bans access. XPCompass goes back to the starting zones "
-               "when you close the game.",
+    "public": {"waiting": "Your account no longer has Only Bans access. Member guide files were withdrawn. "
+               "Close the game to finish installing the starting zones.",
                "installed": "Your account no longer has Only Bans access. XPCompass is back to the starting zones.",
                "running": "Your account no longer has Only Bans access. XPCompass goes back to the starting zones "
                           "when you restart the game."},
@@ -69,6 +70,10 @@ def fills_in(package, current, offered):
 @dataclass
 class Settings:
     source: str = auth.SERVER + "/builds"   # https base URL or folder; <source>/<package>/manifest.json
+    channel: str = "stable"             # one explicit choice for addon and app updates
+    app_switch_to: str = None           # explicit channel switch, including older legacy app builds
+    entitlement_account: str = None    # non-secret hash binding managed member payloads to an account
+    channel_migrated: bool = True        # old configs migrate installed tester builds once
     server: str = auth.SERVER           # Discord sign-in
     game: str = None                    # WoW Forever's client folder, when the player chose it; None finds it by product
     clients: dict = field(default_factory=dict)        # the other games' folders the player chose, by game id ("era")
@@ -81,8 +86,13 @@ class Settings:
     combat_log_days: int = 7            # combat logs XPCompass caused are kept this many days at least (combatlogs.py)
     path: Path = field(default=None, compare=False, repr=False)     # where it is saved; None: settings_path()
 
-    KEYS = ("source", "server", "game", "clients", "last_clients", "packages", "auto_ticked",
+    KEYS = ("source", "channel", "app_switch_to", "channel_migrated", "entitlement_account", "server", "game", "clients", "last_clients", "packages", "auto_ticked",
             "autostart_set", "sharing", "data_channel", "combat_log_days")
+
+    def __post_init__(self):
+        self.channel = channels.canonical(self.channel)
+        if self.app_switch_to is not None:
+            self.app_switch_to = channels.canonical(self.app_switch_to)
 
     def chosen(self, game_id):
         """The client folder the player chose for a game (games.py's id), or None. A choice outranks
@@ -100,9 +110,8 @@ class Settings:
             self.clients.pop(game_id, None)
 
     def active_source(self):
-        """Where builds come from. Testers get test builds from the same address: the server decides
-        by who is signed in, not the app."""
-        return self.source
+        """The addon and app use the same explicit stable/nightly choice."""
+        return channels.source(self.source, self.channel)
 
     @classmethod
     def load(cls, path=None):
@@ -113,6 +122,10 @@ class Settings:
         for key in ("source", "server"):     # the server moved to its own domain
             if isinstance(data.get(key), str):
                 data[key] = auth.OLD_SERVER.sub(auth.SERVER, data[key], count=1)
+        if "channel" not in data:
+            data["channel_migrated"] = False
+            if str(data.get("source", "")).rstrip("/").endswith("/builds-prerelease"):
+                data["channel"] = "nightly"
         data["packages"] = [name for name in data.get("packages", ["forever-coach"]) if name not in RETIRED]
         return cls(**{key: data[key] for key in cls.KEYS if key in data}, path=path)
 
@@ -286,7 +299,7 @@ class Updater:
     def next_delay(self):
         """A build waiting for the game to close, a tester's test builds, and an Only Bans account waiting on
         verification in its first hour (linking.FAST_FOR) are checked every minute."""
-        testing = any(info.get("channel") == "prerelease" for info in self.info.values())
+        testing = self.settings.channel == "nightly"
         verifying = bool(self.linker and self.linker.fast())
         return WAITING_EVERY if self.waiting or testing or verifying else CHECK_EVERY
 
@@ -341,18 +354,22 @@ class Updater:
     def check(self):
         """One round over every package. Returns the events worth telling the player, each once."""
         events = []
+        self.migrate_channel()
         if not self.settings.active_source():
             self.status = "No build source set"
             return self._once(events, Event("error", "", "No build source set yet."))
         token = self._token(events)
+        self.bind_account()
         if self.account:
             # Asked before the builds are: a change after this shows at the next question, not lost between.
             self.access = self.account.access() if self.account.session() else None
             self.link_characters()
-            self.catalog.refresh(self.account.server, token)
+            catalog_error = self.catalog.refresh(channels.source(self.account.server, self.settings.channel), token)
+            self.withdraw_denied(catalog_error is None)
         self.tick_found_games(events)
         wanted = [package for package in self.settings.packages if package in PACKAGES]
         if self.account and not self.account.session():     # sign-in comes first: no anonymous mode
+            self.withdraw_membership()
             for package in wanted:
                 self._note(package, "signin", auth.SIGN_IN_FIRST)
             self.status = auth.SIGN_IN_FIRST
@@ -455,22 +472,96 @@ class Updater:
         if self.linker:
             self.linker.restart()
 
+    def bind_account(self):
+        if not self.account:
+            return
+        session = self.account.session()
+        identity = ((session or {}).get("account_id") or (session or {}).get("token"))
+        bound = hashlib.sha256(json.dumps([self.settings.server, identity]).encode()).hexdigest() if identity else None
+        before = self.settings.entitlement_account
+        if bound != before:
+            # A new account has no right to the previous account's private files while offline.
+            self.withdraw_membership()
+            from .catalog import built_in
+            self.catalog.data, self.catalog.live = built_in(), False
+            self.settings.entitlement_account = bound
+            if self.settings.path:
+                self.settings.save()
+
+    def withdraw_denied(self, catalog_current=False):
+        """A denied channel cannot hide a fresh account-level entitlement loss.
+
+        Forever's member payload follows guild membership; Era's follows its
+        separate tester entitlement. Unticking updates does not retain access.
+        """
+        denied = set()
+        if self.access is not None:
+            for package, about in PACKAGES.items():
+                missing = (self.access.get("prerelease") is False if about["client"] == "era"
+                           else "roles" in self.access and not self.access["roles"])
+                if missing:
+                    denied.add(package)
+        if catalog_current:
+            for entry in self.catalog.entries():
+                if entry["id"] in PACKAGES and entry.get("edition") == "public":
+                    denied.add(entry["id"])
+            if self.catalog.member() is False:
+                denied.update(package for package, about in PACKAGES.items() if about["client"] != "era")
+        self.withdraw_membership(denied)
+
+    def withdraw_membership(self, wanted=None):
+        for package in PACKAGES if wanted is None else wanted:
+            try:
+                game = self.game(PACKAGES[package]["client"])
+                current = install.installed(game, package)
+                before = install.state_dir(game, package) / "previous" / "installed.json"
+                previous = json.loads(before.read_text(encoding="utf-8")) if before.is_file() else None
+                if any(receipt and receipt.get("edition") == "members" for receipt in (current, previous)):
+                    install.revoke_membership(game, package)
+            except (ReleaseError, OSError, ValueError) as error:
+                self._note(package, "error", f"Member files could not be withdrawn: {error}")
+
+    def migrate_channel(self):
+        """Preserve an installed legacy tester choice; access alone never opts somebody in."""
+        if self.settings.channel_migrated:
+            return
+        nightly = channels.canonical((self.app or {}).get("channel")) == "nightly"
+        for package in self.settings.packages:
+            if package not in PACKAGES:
+                continue
+            try:
+                current = install.installed(self.game(PACKAGES[package]["client"]), package)
+                nightly = nightly or channels.canonical((current or {}).get("channel")) == "nightly"
+            except (ReleaseError, OSError, ValueError):
+                continue
+        if nightly:
+            self.settings.channel = "nightly"
+        self.settings.channel_migrated = True
+        if self.settings.path:
+            self.settings.save()
+
     def app_source(self):
-        """Where the app's own build comes from, with the token: the server sends testers its test build."""
+        """The selected stable/nightly build source, with the signed-in account's token."""
         try:
             token = self.account and self.account.token()
         except auth.AuthError:
             token = None
-        return self.settings.source, token
+        return self.settings.active_source(), token
 
     def check_app(self):
         """(manifest of a newer build of the app itself or None, events). The tray applies it."""
         events = []
+        self.migrate_channel()
         if not self.settings.source or not self.app:
             return None, events
         try:
             source, token = self.app_source()
-            return selfupdate.offered(source, self.app, self.keys, token), events
+            explicit = self.settings.app_switch_to == self.settings.channel and self.app.get("channel") is None
+            offered = selfupdate.offered(source, self.app, self.keys, token, allow_older=explicit)
+            if self.app.get("channel") == self.settings.channel and self.settings.app_switch_to is not None:
+                self.settings.app_switch_to = None
+                self.settings.save()
+            return offered, events
         except ReleaseError as error:
             if "is missing" in str(error):          # no app build published at this source yet
                 return None, events
@@ -482,20 +573,28 @@ class Updater:
         offered = release.latest(source, package, self.keys, token)
         current = install.installed(game, package)
         # A testers build (one test_build.py published, or one tools/owner_install.py put in) is never stepped back
-        # to the players' build on its own: only a newer testers build replaces it, or the player's "Switch to the
-        # players' build" (9 November: the owner pressed Update now over their test install and lost its features).
-        held = (current or {}).get("channel") == "prerelease" and offered.get("channel", "release") != "prerelease"
+        # to stable while Nightly remains selected. Explicit stable selection and access withdrawal
+        # take precedence over retention; channel selection never grants membership.
+        was, now = (current or {}).get("edition"), offered.get("edition")
+        revoked = was == "members" and now == "public"
+        if revoked:
+            install.revoke_membership(game, package)
+        held = (channels.canonical((current or {}).get("channel")) == "nightly"
+                and channels.canonical(offered.get("channel")) != "nightly"
+                and self.settings.channel == "nightly" and not revoked)
         if held and package not in self.to_release:
             self.waiting.pop(package, None)
             self.forced.discard(package)
             players = offered.get("version") or offered["build"]
-            self._note(package, "testing", f"Testing build. The players' build is {players}.", current, offered)
+            self._note(package, "testing", f"Nightly build. The stable build is {players}.", current, offered)
             self.info[package]["channel"] = "prerelease"
-            return f"{name} {current['build']}, a testers build kept (the players' build is {offered['build']})"
+            return f"{name} {current['build']}, a nightly build kept (the stable build is {offered['build']})"
+        if not revoked and channels.canonical(offered.get("channel")) != self.settings.channel:
+            raise ReleaseError("the source did not offer the selected build channel; nothing was installed")
         # Moving between a test build and the release, or between editions, may step back to an older build:
         # the server decides who is a tester and who a member, so that is allowed, once. A release's two
         # editions are stamped moments apart, the public one first.
-        same_channel = (current or {}).get("channel", "release") == offered.get("channel", "release")
+        same_channel = channels.canonical((current or {}).get("channel")) == channels.canonical(offered.get("channel"))
         was, now = (current or {}).get("edition"), offered.get("edition")
         moved_edition = bool(was and now and was != now)
         news = EDITION_NEWS.get(now) if moved_edition and same_channel else None

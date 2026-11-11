@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import games
-from .release import PACKAGES, ReleaseError, folders, sha256
+from .release import PACKAGES, ReleaseError, folders, safe_path, sha256
 
 STATE = ".forever-companion"
 
@@ -135,6 +135,8 @@ def install(game, manifest, files, allow_older=False):
     if old:
         (previous / "installed.json").write_text(json.dumps(old, indent=1), encoding="utf-8")
     (state / "installed.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    if manifest.get("edition") == "members":
+        (state / "membership-revoked.json").unlink(missing_ok=True)
     return result
 
 
@@ -147,6 +149,34 @@ def remember(game, manifest):
 
 def new_is_older(old, new):
     return new.get("published", "") < old.get("published", "")
+
+
+def revoke_membership(game, package):
+    """Withdraw managed member payloads and disable member rollback, preserving all saved data.
+
+    Only paths recorded in this package's manifests, inside its members-only folders,
+    are removed. Neither Capture nor personal SavedVariables are package payloads.
+    """
+    editions = PACKAGES[package].get("editions", {})
+    private = set(editions.get("members", ())) - set(editions.get("public", ()))
+    state, addons = state_dir(game, package), addons_dir(game)
+    state.mkdir(parents=True, exist_ok=True)
+    marker = state / "membership-revoked.json"
+    marker.write_text("{}", encoding="utf-8")  # fail closed even if a file is locked
+    for root, receipt in ((addons, state / "installed.json"), (state / "previous", state / "previous" / "installed.json")):
+        if not receipt.exists():
+            continue
+        manifest = json.loads(receipt.read_text(encoding="utf-8"))
+        if manifest.get("edition") != "members":
+            continue  # keep a current public placeholder while withdrawing an older member rollback
+        for name in manifest.get("files", {}):
+            relative = safe_path(name, package)
+            if relative.parts[0] not in private:
+                continue
+            path = root / relative
+            if not path.resolve().is_relative_to(root.resolve()):
+                raise ReleaseError("a managed member file points outside its addon folder")
+            path.unlink(missing_ok=True)
 
 
 def move_saved_settings(game):
@@ -179,6 +209,8 @@ def roll_back(game, package):
     if not before.exists():
         raise ReleaseError("there is no earlier copy to go back to")
     manifest = json.loads(before.read_text(encoding="utf-8"))
+    if manifest.get("edition") == "members" and (state / "membership-revoked.json").exists():
+        raise ReleaseError("the earlier member build no longer matches this account's access; check for updates")
     for folder in manifest["addons"]:
         if not (previous / folder).is_dir():
             raise ReleaseError(f"the earlier copy of {folder} is gone; reinstall instead")

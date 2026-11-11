@@ -25,6 +25,7 @@ with Discord: there is no anonymous mode, and until then the rows wait in the ga
   next look.
 """
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -32,6 +33,8 @@ import secrets
 import time
 import urllib.error
 import urllib.request
+
+from . import tls
 from pathlib import Path
 
 from . import auth, system
@@ -329,15 +332,46 @@ class Uploader:
                 self.file_state(char)["seen"] = self._stat(char)
             return 0
         self.state["told_off"] = False
+        epoch = records.get("epoch")
+        if epoch is not None and not (isinstance(epoch, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", epoch)):
+            self.last = {"at": self.clock(), "text": "Recording stream could not be read; local history was kept."}
+            return 0
+        stream = game_id + "/" + (epoch or "legacy")
+        if mine.get("stream", game_id + "/legacy") != stream:
+            mine.update(slot=secrets.token_urlsafe(12), upto=0, clear=False, fingerprints={}, stream=stream)
+        else:
+            mine["stream"] = stream
+        next_id = records.get("next")
+        if isinstance(next_id, int) and not isinstance(next_id, bool) and next_id <= mine["upto"]:
+            mine.update(slot=secrets.token_urlsafe(12), upto=0, clear=False, fingerprints={})
         rows = [r for r in (records.get("rows") or []) if isinstance(r, dict) and isinstance(r.get("id"), int)]
+        fingerprints = mine.setdefault("fingerprints", {})
+        def fingerprint(row):
+            return hashlib.sha256(json.dumps(row, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if any(str(row["id"]) in fingerprints and fingerprints[str(row["id"])] != fingerprint(row)
+               for row in rows if row["id"] <= mine["upto"]):
+            # Restoring an old file can reuse a sequence number for a different observation.
+            mine.update(slot=secrets.token_urlsafe(12), upto=0, clear=False, fingerprints={})
+            fingerprints = mine["fingerprints"]
         new = [r for r in rows if r["id"] > mine["upto"]]
+        self._save()  # persist the stream slot before any request can reach the server
+        by_id = {row["id"]: row for row in new}
         sent = 0
         chars = records.get("chars") if isinstance(records.get("chars"), list) else []
         try:
-            for start in range(0, len(new), BATCH):
-                answer = self._upload(mine["slot"], {"rows": new[start:start + BATCH], "chars": chars}, game_id)
-                mine["upto"] = max(mine["upto"], answer.get("upto", 0))
+            for batch, descriptors in batches(new, chars):
+                answer = self._upload(mine["slot"], {"rows": batch, "chars": descriptors}, game_id)
+                upto = answer.get("upto", 0)
+                if isinstance(upto, bool) or not isinstance(upto, int) or upto > max(row["id"] for row in batch):
+                    raise UploadError("the server acknowledged rows outside this batch; local history was kept")
+                mine["upto"] = max(mine["upto"], upto)
+                for row in batch:
+                    if row["id"] <= mine["upto"]:
+                        fingerprints[str(row["id"])] = fingerprint(by_id[row["id"]])
+                if len(fingerprints) > BATCH * 2:
+                    mine["fingerprints"] = fingerprints = {key: fingerprints[key] for key in sorted(fingerprints, key=int)[-BATCH * 2:]}
                 sent += answer.get("stored", 0)
+                self._save()
             for char, feedback, char_seen in self._feedback(char_files):
                 answer = self._upload(char["slot"], {"feedback": feedback}, game_id)
                 before = char["feedback"].get("upto", 0) if char["feedback"].get("epoch") == feedback["epoch"] else 0
@@ -404,7 +438,7 @@ class Uploader:
             return False                    # never write what does not read back as meant
         temp = path.with_name(path.name + ".xpc-tmp")
         temp.write_text(new_text, encoding="utf-8", newline="\n")
-        if self.running():                  # the game started meanwhile: leave its file alone
+        if self.running() or path.read_text(encoding="utf-8", errors="replace") != text:  # changed meanwhile: leave it alone
             temp.unlink()
             return False
         os.replace(temp, path)
@@ -462,7 +496,7 @@ class Uploader:
             headers["Authorization"] = f"Bearer {token}"
         request = urllib.request.Request(server + path, data=data, method="POST", headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with tls.urlopen(request, timeout=60) as response:
                 status, raw = response.status, response.read(100_000)
         except urllib.error.HTTPError as error:
             status, raw = error.code, error.read(100_000)
@@ -472,6 +506,32 @@ class Uploader:
             return status, json.loads(raw) if raw else {}
         except ValueError:
             return status, {}
+
+
+def batches(rows, chars):
+    """Each payload includes only descriptors its rows use, with local indices remapped.
+
+    The saved catalogue and row IDs never change. Split at either server limit so old
+    clients with years of build descriptors still deliver every row with exact attribution.
+    """
+    batch, descriptors, indices = [], [], {}
+    for row in rows:
+        ch = row.get("ch")
+        valid = isinstance(ch, int) and not isinstance(ch, bool) and 1 <= ch <= len(chars)
+        if ch is not None and not valid:
+            raise UploadError("a recorded row has an invalid character descriptor; local history was kept")
+        if batch and (len(batch) >= BATCH or (valid and ch not in indices and len(indices) >= 100)):
+            yield batch, descriptors
+            batch, descriptors, indices = [], [], {}
+        copy = dict(row)
+        if valid:
+            if ch not in indices:
+                indices[ch] = len(descriptors) + 1
+                descriptors.append(chars[ch - 1])
+            copy["ch"] = indices[ch]
+        batch.append(copy)
+    if batch:
+        yield batch, descriptors
 
 
 class UploadError(Exception):

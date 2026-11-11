@@ -17,6 +17,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from . import tls
 import webbrowser
 
 from . import system
@@ -179,7 +181,8 @@ class Account:
         if status == 200:
             fresh = {"token": body["token"], "expires_at": int(body["expires_at"]),
                      "name": body.get("display_name") or body.get("username") or session.get("name"),
-                     "prerelease": bool(body.get("prerelease"))}
+                     "prerelease": bool(body.get("prerelease")), "roles": sorted(body.get("roles") or []),
+                     "account_id": body.get("discord_id") or session.get("account_id")}
             self.store.save(fresh)
             return fresh
         code = body.get("error", f"http_{status}")
@@ -201,6 +204,8 @@ class Account:
         if status == 200:
             session["name"] = body.get("display_name") or body.get("username")
             session["prerelease"] = bool(body.get("prerelease"))
+            session["roles"] = sorted(body.get("roles") or [])
+            session["account_id"] = body.get("discord_id") or session.get("account_id")
             self.store.save(session)
         return session.get("name")
 
@@ -225,7 +230,12 @@ class Account:
             return None
         if status != 200:
             return None
-        return {"roles": sorted(body.get("roles") or []), "prerelease": bool(body.get("prerelease")),
+        session = self.session()
+        roles, prerelease = sorted(body.get("roles") or []), bool(body.get("prerelease"))
+        if session and (session.get("roles"), session.get("prerelease")) != (roles, prerelease):
+            session.update(roles=roles, prerelease=prerelease)
+            self.store.save(session)
+        return {"roles": roles, "prerelease": prerelease,
                 "every": body.get("roles_every"), "verifying": body.get("verifying") is True}
 
     def link(self, how, names):
@@ -249,7 +259,7 @@ class Account:
                                                   "User-Agent": "ForeverCoachCompanion",
                                                   **({"Content-Type": "application/json"} if body is not None else {})})
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with tls.urlopen(request, timeout=30) as response:
                 status, raw = response.status, response.read(1_000_000)
         except urllib.error.HTTPError as error:
             status, raw = error.code, error.read(1_000_000)

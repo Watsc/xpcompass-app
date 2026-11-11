@@ -42,7 +42,7 @@ FIGHT_GAP = 6.0           # seconds without a hit either way that end a fight
 IDLE_GAP = 2.5            # seconds between the character's casts that count as idle in a fight
 MOST_SPELLS = 30
 MOST_NPCS = 10
-PENDING = 2000            # rows kept waiting for the server at most
+PENDING = 2000            # stop reading more logs while this many rows await acknowledgement
 OLDEST = 14 * 86400       # a log already older than this when first seen is passed over
 MINE, PLAYER, PET, GUARDIAN = 0x1, 0x400, 0x1000, 0x2000
 DAMAGE = {"SWING_DAMAGE", "RANGE_DAMAGE", "SPELL_DAMAGE", "SPELL_PERIODIC_DAMAGE", "DAMAGE_SHIELD", "DAMAGE_SPLIT"}
@@ -242,6 +242,12 @@ class CombatLogs:
         state["next"] = state.get("next") if isinstance(state.get("next"), int) and state["next"] > 0 else 1
         state["read"] = state.get("read") if isinstance(state.get("read"), dict) else {}
         state["pending"] = state.get("pending") if isinstance(state.get("pending"), list) else []
+        state["acked"] = state.get("acked", 0)
+        # Older apps called a log summarised before its upload succeeded. Their marker cannot
+        # authorize deletion; only a persisted range acknowledged by this app can do so.
+        state["summarised"] = {name: entry["summarised"] for name, entry in state["read"].items()
+                               if isinstance(entry, dict) and entry.get("summarised")
+                               and "last_id" in entry and entry["last_id"] <= state["acked"]}
         return state
 
     def _save(self):
@@ -258,12 +264,12 @@ class CombatLogs:
         if shares is None:
             return 0
         if not shares:
-            self.state["pending"] = []
-            self._save()
             return 0
         noted = combatlogs.sessions(game)
         budget, changed = MOST_READ, False
         for path in sorted((game / "Logs").glob(PATTERN)):
+            if len(self.state["pending"]) >= PENDING:
+                break              # raw logs remain the durable backlog; never trim unsent rows
             try:
                 stat = path.stat()
             except OSError:
@@ -276,34 +282,39 @@ class CombatLogs:
             upto = (seen or {}).get("to", 0)
             if upto >= stat.st_size or now - stat.st_mtime < SETTLE or budget <= 0:
                 continue
-            rows, to = self._read(path, upto, budget, noted)
+            rows, to, parser = self._read(path, upto, budget, noted, (seen or {}).get("parser"))
+            self.state["summarised"].pop(path.name, None)
             budget -= to - upto
             for row in rows:
                 row["id"] = self.state["next"]
                 self.state["next"] += 1
-            self.state["pending"] = (self.state["pending"] + rows)[-PENDING:]
-            entry = {"to": to}
+            self.state["pending"].extend(rows)
+            entry = {"to": to, "last_id": self.state["next"] - 1, "parser": parser}
             if to >= stat.st_size:
                 entry["summarised"] = int(now)
-                self.state.setdefault("summarised", {})[path.name] = int(now)
+                if entry["last_id"] <= self.state["acked"]:
+                    self.state.setdefault("summarised", {})[path.name] = int(now)
             self.state["read"][path.name] = entry
             changed = True
         if changed:
             self._save()
         return self._send()
 
-    def _read(self, path, start, most, noted):
+    def _read(self, path, start, most, noted, parser=None):
         lines, to = read_lines(path, start, most)
         try:
             year = datetime.fromtimestamp(path.stat().st_mtime).year
         except OSError:
             year = datetime.now().year
         reader = Reader(year)
+        if isinstance(parser, dict):
+            reader.me, reader.pets, reader.fight = parser.get("me"), set(parser.get("pets", [])), parser.get("fight")
         for raw in lines:
             reader.feed(raw)
             if "UNIT_DIED" in raw:
                 reader.feed_died(raw)
-        reader.close()
+        if to >= path.stat().st_size:
+            reader.close()
         if reader.kept:
             self.copies.mkdir(parents=True, exist_ok=True)
             with gzip.open(self.copies / (path.stem + ".gz"), "ab", compresslevel=9) as out:   # a member a look
@@ -313,7 +324,7 @@ class CombatLogs:
             before = [s for s in noted if s["at"] <= fight["start"] + 60]
             who = max(before, key=lambda s: s["at"]) if before else {}
             rows.append(row_of(fight, who))
-        return rows, to
+        return rows, to, {"me": reader.me, "pets": sorted(reader.pets), "fight": reader.fight}
 
     def _send(self):
         pending = self.state["pending"]
@@ -325,6 +336,14 @@ class CombatLogs:
             self.uploader.last = {"at": self.clock(), "text": f"Fights not sent, will try again: {failure}"}
             return 0
         upto = answer.get("upto", 0)
+        sent = pending[:uploads.BATCH]
+        if isinstance(upto, bool) or not isinstance(upto, int) or upto > sent[-1]["id"]:
+            self.uploader.last = {"at": self.clock(), "text": "Fights not acknowledged safely; will try again."}
+            return 0
+        self.state["acked"] = max(self.state["acked"], upto)
         self.state["pending"] = [row for row in pending if row["id"] > upto]
+        for name, entry in self.state["read"].items():
+            if entry.get("summarised") and "last_id" in entry and entry["last_id"] <= self.state["acked"]:
+                self.state["summarised"][name] = entry["summarised"]
         self._save()
         return answer.get("stored", 0)

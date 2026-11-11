@@ -156,13 +156,13 @@ function card(a, s) {
   const pct = a.progress == null ? null : Math.round(a.progress * 100);
   return `<div class="card">
     <div class="top">${mark(a, s)}
-      <div class="grow"><div class="name">${esc(a.name)}</div><div class="sub">${appLine(a)}${a.testing ? ` · <span class="tag">Testing build</span>` : ""}</div></div>
+      <div class="grow"><div class="name">${esc(a.name)}</div><div class="sub">${appLine(a)}${a.testing ? ` · <span class="tag">Nightly build</span>` : ""}</div></div>
       ${pill(a)}</div>
     ${busy ? `<div class="progress"><div class="bar ${pct == null ? "busy" : ""}"><div style="width:${pct || 0}%"></div></div>
       <div class="small"><span>${a.state === "installing" ? "Installing…" : "Downloading…"}</span><span>${pct == null ? "" : pct + "%"}</span></div></div>` : ""}
     ${a.state === "error" || a.state === "locked" ? `<div class="note">${esc(a.text)}</div>` : ""}
     ${a.state === "testing" ? `<div class="note">${esc(a.text)} <button class="link" data-act="use_release" data-id="${a.id}"
-      title="Replaces this testing build now; restart WoW after">Switch to the players' build</button></div>` : ""}
+      title="Use stable updates; close WoW to install safely">Switch to stable</button></div>` : ""}
     ${a.pick ? `<div style="margin-top:6px"><button class="primary" data-act="pick_game" data-id="${a.pick}">Choose folder</button></div>` : ""}
     ${a.upgrade ? `<div class="note gold">${esc(a.upgrade.text)}</div>` : ""}
     <div class="meta">${versionLine(a)}
@@ -204,6 +204,8 @@ function mainView(s) {
   const available = s.addons.filter(a => a.available), locked = s.addons.filter(a => !a.available);
   return `<main>
     ${s.signin.error ? `<div class="error">${esc(s.signin.error)}</div>` : ""}
+    ${(s.job_errors || []).map(j => `<div class="note">${esc(j.text)} ${esc(j.recovery)}
+      <button class="link" data-act="check_now">Check now</button></div>`).join("")}
     ${(s.notices || []).map(n => `<div class="note gold">${esc(n.text)}
       <button class="link" data-act="dismiss_notice" data-id="${n.id}">OK</button></div>`).join("")}
     ${[...new Set(s.addons.map(a => a.game || "Other"))].map(game => {
@@ -224,6 +226,10 @@ function options(s) {
       <div style="margin-top:6px"><button data-act="pick_game" data-id="${c.id}">Change</button>
         ${c.path ? `<button data-act="open_addons" data-id="${c.id}">Open AddOns</button>` : ""}
         ${c.chosen ? `<button class="link" data-act="use_found_client" data-id="${c.id}">Find it automatically</button>` : ""}</div></div>`).join("")}
+    <div class="opt"><div class="label">Build channel · ${s.channel === "nightly" ? "Nightly" : "Stable"}</div>
+      <div class="small">Stable receives fixes and proven features. Nightly previews new features for the addon and app.</div>
+      <button data-act="set_channel" data-id="stable" ${s.channel === "stable" ? "disabled" : ""}>Stable</button>
+      ${s.can_nightly || s.channel === "nightly" ? `<button data-act="set_channel" data-id="nightly" ${s.channel === "nightly" || !s.can_nightly ? "disabled" : ""}>Nightly</button>` : ""}</div>
     <div class="opt"><label class="check"><input type="checkbox" data-act="toggle_start" ${s.start_with_windows ? "checked" : ""}>
       ${esc(s.login_label || "Start with Windows")}</label></div>
     <div class="opt"><label class="check"><input type="checkbox" data-act="toggle_data" ${s.data_channel ? "checked" : ""}>

@@ -10,6 +10,7 @@ ISRG Root X2, until 2040, SHA-256 69:72:9B:8E:15:A8:6E:FC:...
 import http.client
 import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOTS = """-----BEGIN CERTIFICATE-----
@@ -81,6 +82,33 @@ class FallbackHandler(urllib.request.HTTPSHandler):
             raise first from None   # ours didn't fit either (a proxy or antivirus in between, say): what the PC said
 
 
+def origin(url):
+    """Scheme, hostname and effective port; user information never belongs in our URLs."""
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("credentials in URLs are not allowed")
+    return parsed.scheme.lower(), (parsed.hostname or "").lower(), parsed.port or (443 if parsed.scheme == "https" else 80)
+
+
+class SafeRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        old, new = origin(req.full_url), origin(newurl)
+        private = any(name.lower() in ("authorization", "cookie", "x-xpc-install") for name, _ in req.header_items())
+        if (private and old != new) or (old[0] == "https" and new[0] != "https"):
+            raise urllib.error.HTTPError(req.full_url, 403, "unsafe redirect refused", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def urlopen(request, timeout=30):
+    """Origin-bound transport even when a caller uses the library without starting the app."""
+    if isinstance(request, urllib.request.Request):
+        private = any(name.lower() in ("authorization", "cookie", "x-xpc-install") for name, _ in request.header_items())
+        scheme, host, _ = origin(request.full_url)
+        if private and scheme != "https" and not (scheme == "http" and host in ("localhost", "127.0.0.1", "::1")):
+            raise urllib.error.URLError("authenticated requests require https")
+    return urllib.request.build_opener(FallbackHandler(), SafeRedirect()).open(request, timeout=timeout)
+
+
 def install():
     """Every urlopen in the app from here on."""
-    urllib.request.install_opener(urllib.request.build_opener(FallbackHandler()))
+    urllib.request.install_opener(urllib.request.build_opener(FallbackHandler(), SafeRedirect()))

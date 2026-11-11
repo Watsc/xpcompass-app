@@ -16,7 +16,7 @@ import pystray
 from PIL import Image, ImageDraw
 
 from . import auth, games, release, selfupdate, service, system, uploads, window, tls
-from . import combatlogs, datachannel, gamelogs, market, sync
+from . import combatlogs, datachannel, gamelogs, market, sync, jobs
 from .release import PACKAGES, TRUSTED_KEYS, ReleaseError
 from . import level_medians
 
@@ -68,6 +68,7 @@ class Tray:
         self.updater = updater or service.Updater(self.settings, account=self.account)
         self.uploader = uploader or uploads.Uploader(self.settings, account=self.account)
         self.data = datachannel.Channel(self.settings, self.uploader)
+        self.jobs = jobs.Status()
         self.wake = threading.Event()
         self.upload_wake = threading.Event()
         self.stopping, self.checking = False, False
@@ -133,22 +134,22 @@ class Tray:
     def upload_loop(self):
         """Every minute: what each game's client recorded since the last look goes to the server (uploads.py)."""
         while not self.stopping:
-            for game_id, folder in self.updater.clients().items():      # no client yet: nothing to look at
-                try:
-                    self.uploader.look(folder, game_id)
-                    self.medians.look(folder, game_id)                  # other players' level times, into the game
-                    gamelogs.look(self.uploader, folder, game_id)       # the game's load errors and crashes
-                    combatlogs.look(self.uploader, folder, game_id)     # the combat log's fights; old logs cleared
-                    market.look(self.uploader, folder, game_id)         # XPC - Market's auction house scans
-                    sync.guarded_look(self.uploader, folder, game_id)           # the player's other PCs
-                except Exception as error:   # noqa: BLE001 - an upload problem never stops the app
-                    self.uploader.last = {"at": time.time(), "text": f"Upload failed, will try again: {error}"}
-            try:
-                self.data.tick(self.updater.clients())          # data from the server (datachannel.py)
-            except Exception as error:   # noqa: BLE001 - a data problem never stops the app
-                self.data.last = f"Data not updated: {error}"
+            self.upload_once()
             self.upload_wake.wait(uploads.LOOK_EVERY)
             self.upload_wake.clear()
+
+    def upload_once(self):
+        """Each stage retains its own retry status and cannot suppress a later stage."""
+        _, clients = self.jobs.run("all", "clients", self.updater.clients, uploads.LOOK_EVERY)
+        for game_id, folder in (clients or {}).items():
+            tasks = (("records", self.uploader.look), ("medians", self.medians.look),
+                     ("logs", lambda f, g: gamelogs.look(self.uploader, f, g)),
+                     ("combat", lambda f, g: combatlogs.look(self.uploader, f, g)),
+                     ("market", lambda f, g: market.look(self.uploader, f, g)),
+                     ("sync", lambda f, g: sync.guarded_look(self.uploader, f, g)))
+            for name, task in tasks:
+                self.jobs.run(game_id, name, lambda: task(folder, game_id), uploads.LOOK_EVERY)
+        self.jobs.run("all", "data", lambda: self.data.tick(clients or {}), uploads.LOOK_EVERY)
 
     def notify(self, text):
         try:
@@ -246,7 +247,7 @@ class Tray:
                 "build": info.get("offered"), "releases": info.get("releases", []), "notes": info.get("notes", []),
                 "game": row.get("game", "Other"),
                 "pick": client if installable and client in missing else None,     # the card's Choose folder
-                "testing": info.get("channel") == "prerelease" or (not info.get("channel") and row.get("testing", False)),
+                "testing": info.get("channel") in ("prerelease", "nightly") or (not info.get("channel") and row.get("testing", False)),
                 "progress": info.get("progress"), "upgrade": row.get("upgrade"),
                 "edition_name": release.EDITION_NAMES.get(info.get("edition") or row.get("edition") or "")
                                 or row.get("edition_name"),
@@ -255,10 +256,12 @@ class Tray:
         sent = self.uploader.last
         return {
             "uploaded": sent and f"{sent['text']} ({ago(time.time() - sent['at'])})",
+            "job_errors": self.jobs.failures() if getattr(self, "jobs", None) else [],
             "logo": self.logo, "signed_in": bool(session), "name": session and session.get("name"),
             "member": bool(self.updater.catalog.member()), "app_update": self.app_update, "crest": self.crest,
             "welcome": not session, "signin": dict(self.signin),
-            "addons": addons,
+            "addons": addons, "channel": self.settings.channel,
+            "can_nightly": bool(session and session.get("prerelease")),
             "checking": self.checking, "checked": checked and ago(time.time() - checked),
             "game": game, "clients": clients, "notices": self.updater.notice_rows(),
             "start_with_windows": starts_with_windows(), "data_channel": self.settings.data_channel,
@@ -298,6 +301,9 @@ class Tray:
 
     def sign_out(self):
         self.account.sign_out()
+        self.updater.bind_account()
+        self.wake.set()
+        self.upload_wake.set()
 
     def set_wanted(self, package, on):
         """Tick or untick an addon. Ticking one ticks what it needs; unticking one unticks what needs it.
@@ -363,9 +369,23 @@ class Tray:
         """Replace the testers build in the game with the players' build, the player's own choice, straight away
         like Update now (the app never does it on its own: service.Updater._check)."""
         if package in PACKAGES:
+            self.set_channel("stable")
             self.updater.to_release.add(package)
-            self.updater.forced.add(package)
             self.wake.set()
+
+    def set_channel(self, channel):
+        """A channel change covers both the companion and every addon; never forces a running-game swap."""
+        from .channels import canonical
+        wanted = canonical(channel)
+        session = self.account.session() or {}
+        if wanted == "nightly" and not session.get("prerelease"):
+            return
+        self.settings.channel, self.settings.channel_migrated = wanted, True
+        self.settings.app_switch_to = wanted
+        self.settings.save()
+        self.updater.waiting.clear()
+        self.updater.forced.clear()
+        self.wake.set()
 
     def set_start(self, on):
         set_start_with_windows(on)

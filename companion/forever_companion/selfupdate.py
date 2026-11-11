@@ -53,8 +53,48 @@ def current():
         from . import _build      # written when the app is packaged
     except ImportError:
         return None
-    return {"build": _build.BUILD, "published": _build.PUBLISHED, "kind": getattr(_build, "KIND", ""),
+    mine = {"build": _build.BUILD, "published": _build.PUBLISHED, "kind": getattr(_build, "KIND", ""),
             "version": getattr(_build, "VERSION", "")}
+    channel = getattr(_build, "CHANNEL", None)
+    # A native installer can be re-signed for a different channel without changing
+    # its bytes. Only a receipt matching this actual running stamp may override it.
+    for receipt in channel_receipts():
+        if all(receipt.get(field) == mine[field] for field in ("build", "published")):
+            channel = receipt.get("channel")
+            break
+    if channel is not None:
+        try:
+            mine["channel"] = release.channels.canonical(channel)
+        except ValueError:
+            pass
+    return mine
+
+
+def channel_receipts():
+    rows = _read_json(system.data_dir() / "app-channels.json")
+    return [row for row in rows[:8] if isinstance(row, dict)] if isinstance(rows, list) else []
+
+
+def remember_channel(manifest, mine=None):
+    """Record selection after signature checking; never use this cache to trust bytes."""
+    identity = mine or manifest
+    row = {field: identity[field] for field in ("build", "published")}
+    row["channel"] = release.channels.canonical(manifest.get("channel"))
+    rows = [row] + [old for old in channel_receipts()
+                    if any(old.get(field) != row[field] for field in ("build", "published"))]
+    path = system.data_dir() / "app-channels.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".new")
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(rows[:8], handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except OSError:
+        pass  # selection is still known in this process; failed writes never authorize an update
+    if mine is not None:
+        mine["channel"] = row["channel"]
 
 
 def launcher():
@@ -63,7 +103,7 @@ def launcher():
     return module if getattr(module, "RUNNING", False) else None
 
 
-def offered(source, mine, keys=None, token=None, package=None):
+def offered(source, mine, keys=None, token=None, package=None, allow_older=False):
     """The verified manifest of a newer app build at `source`, or None. The migration build takes
     any installer build, since it is never the copy a player keeps. Under the launcher: the newer code,
     unless it failed to start before or needs a newer launcher, which then comes by the setup."""
@@ -73,7 +113,12 @@ def offered(source, mine, keys=None, token=None, package=None):
     manifest = release.latest(source, package, keys, token)
     if mine.get("kind") == MIGRATE:
         return manifest
-    if manifest["published"] <= mine["published"]:
+    if manifest["build"] == mine["build"]:
+        remember_channel(manifest, mine)
+        return None
+    switching = allow_older or (mine.get("channel") is not None and
+        release.channels.canonical(manifest.get("channel")) != release.channels.canonical(mine["channel"]))
+    if not switching and manifest["published"] <= mine["published"]:
         return None
     if package != release.APP_CODE:
         return manifest
@@ -85,7 +130,7 @@ def offered(source, mine, keys=None, token=None, package=None):
         raise ReleaseError("the app update does not say which launcher it needs; it was not installed")
     if needs > getattr(running, "ABI", 0):
         setup = release.latest(source, release.APP_SETUP, keys, token)
-        return setup if setup["published"] > mine["published"] else None
+        return setup if switching or setup["published"] > mine["published"] else None
     return manifest
 
 
@@ -99,14 +144,18 @@ def apply(source, manifest, target=None, token=None, progress=None):
     or for the installer the folder it is saved in. Returns the path to start."""
     package = manifest["package"]
     if package == release.APP_CODE:
-        return _put_code(release.download(source, manifest, token, progress), manifest["build"],
-                         Path(target) if target else code_root())
-    data = release.download(source, manifest, token, progress)[APP_FILES[package]]
-    if package == release.APP_MAC:
-        return _swap_bundle(data, Path(target) if target else system.mac_bundle())
-    if package == release.APP_SETUP:
-        return _save_setup(data, manifest["build"], Path(target) if target else pending_dir())
-    return _swap_exe(data, Path(target or sys.executable))
+        result = _put_code(release.download(source, manifest, token, progress), manifest["build"],
+                           Path(target) if target else code_root())
+    else:
+        data = release.download(source, manifest, token, progress)[APP_FILES[package]]
+        if package == release.APP_MAC:
+            result = _swap_bundle(data, Path(target) if target else system.mac_bundle())
+        elif package == release.APP_SETUP:
+            result = _save_setup(data, manifest["build"], Path(target) if target else pending_dir())
+        else:
+            result = _swap_exe(data, Path(target or sys.executable))
+    remember_channel(manifest)
+    return result
 
 
 def code_root():
