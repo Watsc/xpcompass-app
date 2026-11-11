@@ -215,8 +215,9 @@ class Account:
 
 
     def access(self):
-        """What the server says this account holds now, {"roles", "prerelease", "every"}, every being how often
-        it is worth asking (None: the server only learns at the daily renewal). None when it can't say."""
+        """What the server says this account holds now, {"roles", "prerelease", "every", "verifying"}, every being how
+        often it is worth asking (None: the server only learns at the daily renewal), verifying whether the account is
+        in the Only Bans Discord waiting on verification (linking.py). None when it can't say."""
         try:
             token = self.token()
             status, body = self.call("GET", "/me", token) if token else (0, {})
@@ -225,15 +226,28 @@ class Account:
         if status != 200:
             return None
         return {"roles": sorted(body.get("roles") or []), "prerelease": bool(body.get("prerelease")),
-                "every": body.get("roles_every")}
+                "every": body.get("roles_every"), "verifying": body.get("verifying") is True}
 
-    def call(self, method, path, token):
-        """(status, JSON body) of a request to the server, with the token."""
+    def link(self, how, names):
+        """Send the names of the characters on this PC (linking.py) while the account waits on verification: the
+        server's answer, {"verifying", "counted"}, or None when it can't say."""
+        try:
+            token = self.token()
+            status, body = (self.call("POST", "/link", token, {"game": "forever", "how": how, "names": list(names)})
+                            if token else (0, {}))
+        except AuthError:
+            return None
+        return body if status == 200 else None
+
+    def call(self, method, path, token, body=None):
+        """(status, JSON body) of a request to the server, with the token and, for a POST, `body` as JSON."""
         if not (self.server.startswith("https://") or local(self.server)):
             raise AuthError("insecure", "the sign-in server must use https")
-        request = urllib.request.Request(self.server + path, method=method, data=b"" if method == "POST" else None,
+        data = (json.dumps(body).encode("utf-8") if body is not None else b"") if method == "POST" else None
+        request = urllib.request.Request(self.server + path, method=method, data=data,
                                          headers={"Authorization": f"Bearer {token}",
-                                                  "User-Agent": "ForeverCoachCompanion"})
+                                                  "User-Agent": "ForeverCoachCompanion",
+                                                  **({"Content-Type": "application/json"} if body is not None else {})})
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 status, raw = response.status, response.read(1_000_000)

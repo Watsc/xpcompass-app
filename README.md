@@ -82,5 +82,5 @@ release's VirusTotal link on [xpcompass.com/download](https://xpcompass.com/down
 
 ## Licence
 
-All rights reserved, unless a LICENSE file in this repository says otherwise. You may read and build
-the code to check what the app does.
+All rights reserved; see LICENSE. You may read and build the code to check what the app does, and
+nothing more.

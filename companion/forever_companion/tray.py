@@ -359,6 +359,14 @@ class Tray:
             self.updater.forced.add(package)
             self.wake.set()
 
+    def use_release(self, package):
+        """Replace the testers build in the game with the players' build, the player's own choice, straight away
+        like Update now (the app never does it on its own: service.Updater._check)."""
+        if package in PACKAGES:
+            self.updater.to_release.add(package)
+            self.updater.forced.add(package)
+            self.wake.set()
+
     def set_start(self, on):
         set_start_with_windows(on)
 

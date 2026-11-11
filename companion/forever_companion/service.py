@@ -5,7 +5,12 @@ When to install:
 - the game is closed: install now;
 - the game is open and the build only changes file contents: install now, and say to /reload;
 - the game is open and the build adds, removes or renames files or changes a .toc: wait, since a
-  /reload would mix the old file list with new files; install as soon as the game closes.
+  /reload would mix the old file list with new files; install as soon as the game closes;
+- one exception: the switch to the members edition when the public edition already holds its folder empty (fills_in):
+  install now, and say "You're verified: type /reload in game".
+
+While the server says an Only Bans account waits on verification, each check also sends the characters on this PC
+(linking.py), and checks come every minute for its first hour.
 
 Only the manifest (two small files) is fetched on each check; the zip only when there is something
 to install. check_app does the same for the app itself (selfupdate.py). Between checks the app asks the
@@ -16,7 +21,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import auth, games, install, release, selfupdate, system, uploads
+from . import auth, games, install, linking, release, selfupdate, system, uploads
 from .catalog import Catalog
 from .release import PACKAGES, RETIRED, ReleaseError, SignInNeeded
 
@@ -24,9 +29,12 @@ CHECK_EVERY = 15 * 60       # seconds between checks
 WAITING_EVERY = 60          # while a build waits for the game to close
 ASK_AT_LEAST = 15           # seconds: the fastest the server may have the app ask about its roles
 # What the player is told when the account's edition changes. Going to the members edition adds an addon folder,
-# and the game reads the list of addons only when it starts, so a /reload can't load it (install.needs).
+# and the game reads the list of addons only when it starts, so a /reload can't load it (install.needs). Since
+# 11 November the public edition carries that folder empty (tools/publish_build.py's stubs), so the members edition
+# only fills it in: that one switch installs with the game open, and a /reload loads it ("reload", fills_in).
 EDITION_NEWS = {
-    "members": {"waiting": "Your account now gets every Horde guide. Close the game to install them, then start it again.",
+    "members": {"reload": "You're verified: type /reload in game to load every Horde guide.",
+                "waiting": "Your account now gets every Horde guide. Close the game to install them, then start it again.",
                 "installed": "Your account now gets every Horde guide. Installed: they load when you start the game.",
                 "running": "Your account now gets every Horde guide. Installed: restart the game fully to load them, "
                            "a /reload is not enough."},
@@ -40,6 +48,22 @@ EDITION_NEWS = {
 
 def settings_path():
     return system.data_dir() / "companion.json"
+
+
+def fills_in(package, current, offered):
+    """Whether going from `current` (the public edition) to `offered` (the members edition) only fills in folders
+    the public edition already holds empty, with nothing else needing more than a /reload: then it may install
+    while the game runs. A public edition from before the empty folder, or any other change to the file list or a
+    .toc outside those folders, still waits for the game to close."""
+    editions = PACKAGES.get(package, {}).get("editions") or {}
+    filled = set(editions.get("members", ())) - set(editions.get("public", ()))
+    if not current or not offered or not filled or not filled <= set(current.get("addons") or ()):
+        return False
+
+    def outside(manifest):
+        return {"files": {name: digest for name, digest in (manifest.get("files") or {}).items()
+                          if name.split("/")[0] not in filled}}
+    return install.needs(outside(current), outside(offered)) != "restart"
 
 
 @dataclass
@@ -138,12 +162,14 @@ class Updater:
         self.app = selfupdate.current() if app is None else app      # None when run from source
         self.waiting = {}            # package -> build waiting for the game to close
         self.forced = set()          # packages the player asked to update now, game open or not
+        self.to_release = set()      # packages the player asked to switch from a testers build to the players' build
         self.said = set()            # (package, text) already reported, so a notice shows once
         self.notices = {}            # game id -> a standing notice for the window (moved clients), until dismissed
         self.status = "Not checked yet"
         self.info = {}               # package -> what the window shows: state, text, builds, notes
         self.checked_at = None
         self.access = None           # what the server said the account holds at the last check (auth.Account.access)
+        self.linker = linking.Linker(account) if account else None    # the characters on this PC, while verifying
 
     def game(self, game_id=games.FOREVER.id):
         """The client folder of one game: the player's choice, else the one found by product. A choice
@@ -258,9 +284,26 @@ class Updater:
         return text
 
     def next_delay(self):
-        """A build waiting for the game to close, or a tester's test builds, are checked every minute."""
+        """A build waiting for the game to close, a tester's test builds, and an Only Bans account waiting on
+        verification in its first hour (linking.FAST_FOR) are checked every minute."""
         testing = any(info.get("channel") == "prerelease" for info in self.info.values())
-        return WAITING_EVERY if self.waiting or testing else CHECK_EVERY
+        verifying = bool(self.linker and self.linker.fast())
+        return WAITING_EVERY if self.waiting or testing or verifying else CHECK_EVERY
+
+    def link_characters(self):
+        """While the server says this account waits on verification, send the characters on this PC (linking.py),
+        from WoW Forever's client only. Returns {how: names} sent."""
+        if not self.linker:
+            return {}
+        verifying = bool(self.access and self.access.get("verifying") is True)
+        try:
+            client = self.game(games.FOREVER.id) if verifying else None
+        except ReleaseError:
+            client = None
+        try:
+            return self.linker.step(self.access, client)
+        except Exception:   # noqa: BLE001 - linking never stops a check
+            return {}
 
     def ask_every(self):
         """Seconds between questions about the account's roles, as the server says; None when it says not to ask."""
@@ -305,6 +348,7 @@ class Updater:
         if self.account:
             # Asked before the builds are: a change after this shows at the next question, not lost between.
             self.access = self.account.access() if self.account.session() else None
+            self.link_characters()
             self.catalog.refresh(self.account.server, token)
         self.tick_found_games(events)
         wanted = [package for package in self.settings.packages if package in PACKAGES]
@@ -406,8 +450,10 @@ class Updater:
             return None
 
     def signed_in(self):
-        """Let the sign-in notices show again the next time they apply."""
+        """Let the sign-in notices show again the next time they apply; a waiting account's minute checks start over."""
         self.said = {said for said in self.said if not said[1].startswith("Sign in")}
+        if self.linker:
+            self.linker.restart()
 
     def app_source(self):
         """Where the app's own build comes from, with the token: the server sends testers its test build."""
@@ -435,6 +481,17 @@ class Updater:
         source = self.settings.active_source()
         offered = release.latest(source, package, self.keys, token)
         current = install.installed(game, package)
+        # A testers build (one test_build.py published, or one tools/owner_install.py put in) is never stepped back
+        # to the players' build on its own: only a newer testers build replaces it, or the player's "Switch to the
+        # players' build" (9 November: the owner pressed Update now over their test install and lost its features).
+        held = (current or {}).get("channel") == "prerelease" and offered.get("channel", "release") != "prerelease"
+        if held and package not in self.to_release:
+            self.waiting.pop(package, None)
+            self.forced.discard(package)
+            players = offered.get("version") or offered["build"]
+            self._note(package, "testing", f"Testing build. The players' build is {players}.", current, offered)
+            self.info[package]["channel"] = "prerelease"
+            return f"{name} {current['build']}, a testers build kept (the players' build is {offered['build']})"
         # Moving between a test build and the release, or between editions, may step back to an older build:
         # the server decides who is a tester and who a member, so that is allowed, once. A release's two
         # editions are stamped moments apart, the public one first.
@@ -457,7 +514,9 @@ class Updater:
             return f"{name} {offered['build']}, up to date"
         forced = package in self.forced
         self.forced.discard(package)
-        if need == "restart" and current and self.running() and not forced:
+        # Just verified: the members edition fills in the empty folder the public one holds, and a /reload loads it.
+        reload_in = bool(news) and was == "public" and now == "members" and fills_in(package, current, offered)
+        if need == "restart" and current and self.running() and not forced and not reload_in:
             self.waiting[package] = offered["build"]
             self._note(package, "waiting", news["waiting"] if news else "Update ready. It installs when you close the game.",
                        current, offered)
@@ -475,8 +534,9 @@ class Updater:
         result = install.install(game, offered, files, allow_older=switching)
         self.info[package].pop("progress", None)
         self.waiting.pop(package, None)
+        self.to_release.discard(package)
         if news:
-            text = news["running" if self.running() else "installed"]
+            text = news["reload" if reload_in and self.running() else "running" if self.running() else "installed"]
         elif not self.running() and result.needs != "nothing":
             text = f"{name} updated to {result.build}. It loads next time you start the game."
         else:

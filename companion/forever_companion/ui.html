@@ -139,6 +139,7 @@ function header(s) {
 
 function pill(a) {
   return {current: `<span class="pill ok">Up to date</span>`, installed: `<span class="pill ok">Updated</span>`,
+          testing: `<span class="pill ok">Kept</span>`,
           waiting: `<button class="update" data-act="update_now" data-id="${a.id}" title="Install now; restart WoW after">Update now</button>`,
           pending: `<span class="pill dim">Checking</span>`,
           none: `<span class="pill dim">No build yet</span>`, error: `<span class="pill bad">Problem</span>`,
@@ -160,6 +161,8 @@ function card(a, s) {
     ${busy ? `<div class="progress"><div class="bar ${pct == null ? "busy" : ""}"><div style="width:${pct || 0}%"></div></div>
       <div class="small"><span>${a.state === "installing" ? "Installing…" : "Downloading…"}</span><span>${pct == null ? "" : pct + "%"}</span></div></div>` : ""}
     ${a.state === "error" || a.state === "locked" ? `<div class="note">${esc(a.text)}</div>` : ""}
+    ${a.state === "testing" ? `<div class="note">${esc(a.text)} <button class="link" data-act="use_release" data-id="${a.id}"
+      title="Replaces this testing build now; restart WoW after">Switch to the players' build</button></div>` : ""}
     ${a.pick ? `<div style="margin-top:6px"><button class="primary" data-act="pick_game" data-id="${a.pick}">Choose folder</button></div>` : ""}
     ${a.upgrade ? `<div class="note gold">${esc(a.upgrade.text)}</div>` : ""}
     <div class="meta">${versionLine(a)}
