@@ -24,7 +24,7 @@ from pathlib import Path
 
 from . import auth, channels, games, install, linking, release, selfupdate, system, uploads
 from .catalog import Catalog
-from .release import PACKAGES, RETIRED, ReleaseError, SignInNeeded
+from .release import PACKAGES, RETIRED, ReleaseError, SignInNeeded, offered
 
 CHECK_EVERY = 15 * 60       # seconds between checks
 WAITING_EVERY = 60          # while a build waits for the game to close
@@ -248,7 +248,7 @@ class Updater:
         for game_id, game in games.GAMES.items():
             package = game.package
             if (game_id == games.FOREVER.id or package in self.settings.auto_ticked or game_id not in folders
-                    or package not in PACKAGES or not self.catalog.live or not self.catalog.installable(package)):
+                    or not offered(package) or not self.catalog.live or not self.catalog.installable(package)):
                 continue
             self.settings.auto_ticked.append(package)
             if package not in self.settings.packages:
@@ -266,6 +266,8 @@ class Updater:
         rows = []
         found, problems = self.resolve()
         for game_id, game in games.GAMES.items():
+            if not offered(game.package):
+                continue
             folder = found.get(game_id)
             if folder is None and game_id != games.FOREVER.id and game.package not in self.settings.packages:
                 continue
@@ -367,7 +369,7 @@ class Updater:
             catalog_error = self.catalog.refresh(channels.source(self.account.server, self.settings.channel), token)
             self.withdraw_denied(catalog_error is None)
         self.tick_found_games(events)
-        wanted = [package for package in self.settings.packages if package in PACKAGES]
+        wanted = [package for package in self.settings.packages if offered(package)]
         if self.account and not self.account.session():     # sign-in comes first: no anonymous mode
             self.withdraw_membership()
             for package in wanted:
@@ -387,19 +389,16 @@ class Updater:
             if notice:
                 self._once(events, Event("moved", games.GAMES[game_id].package, notice))
         lines = []
-        self.info = {package: info for package, info in self.info.items() if package in self.settings.packages}
+        self.info = {package: info for package, info in self.info.items() if package in wanted}
         if any(uploads.opted_out(self.settings, folder) for folder in folders.values()):
             self.notices["sharing"] = uploads.OPTED_OUT     # one line at the window's top, back at each check
-            for package in self.settings.packages:      # sharing off: no addon updates (DECISIONS.md)
-                if package in PACKAGES:
-                    self._note(package, "paused", uploads.OPTED_OUT)
+            for package in wanted:      # sharing off: no addon updates (DECISIONS.md)
+                self._note(package, "paused", uploads.OPTED_OUT)
             self.status = uploads.OPTED_OUT
             self.checked_at = time.time()
             return self._once(events, Event("sharing", "", uploads.OPTED_OUT))
         self.notices.pop("sharing", None)
-        for package in self.settings.packages:
-            if package not in PACKAGES:
-                continue
+        for package in wanted:
             name = PACKAGES[package]["name"]
             game = folders.get(PACKAGES[package]["client"])
             if game is None:                    # this package's game has no client here; the others go on
@@ -510,6 +509,8 @@ class Updater:
         self.withdraw_membership(denied)
 
     def withdraw_membership(self, wanted=None):
+        # Every package, offered or not (release.APP_GAMES): losing access withdraws the members-only files the app put
+        # in, an Era install the app no longer updates too; nothing else of it is touched.
         for package in PACKAGES if wanted is None else wanted:
             try:
                 game = self.game(PACKAGES[package]["client"])
@@ -521,13 +522,25 @@ class Updater:
             except (ReleaseError, OSError, ValueError) as error:
                 self._note(package, "error", f"Member files could not be withdrawn: {error}")
 
+    def guides_withdrawn(self):
+        """Whether the app took out members-only files it had installed and has not put a build back since
+        (install.revoke_membership's marker, cleared by the next install): the guild guides are gone from the game."""
+        for package in PACKAGES:
+            try:
+                if (install.state_dir(self.game(PACKAGES[package]["client"]), package)
+                        / "membership-revoked.json").exists():
+                    return True
+            except (ReleaseError, OSError):
+                continue
+        return False
+
     def migrate_channel(self):
         """Preserve an installed legacy tester choice; access alone never opts somebody in."""
         if self.settings.channel_migrated:
             return
         nightly = channels.canonical((self.app or {}).get("channel")) == "nightly"
         for package in self.settings.packages:
-            if package not in PACKAGES:
+            if not offered(package):
                 continue
             try:
                 current = install.installed(self.game(PACKAGES[package]["client"]), package)

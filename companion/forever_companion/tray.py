@@ -232,6 +232,8 @@ class Tray:
         missing = {client["id"] for client in clients if not client["path"]}     # games with no folder to install into
         addons = []
         for row in rows:                    # the server's list for this account, in its order
+            if row["id"] in PACKAGES and not release.offered(row["id"]):
+                continue                    # a game the app leaves alone (release.APP_GAMES)
             info = self.updater.info.get(row["id"], {})
             client = PACKAGES.get(row["id"], {}).get("client")
             installable = row["status"] == "installable"
@@ -243,6 +245,7 @@ class Tray:
                 "state": info.get("state", "pending"), "text": info.get("text", "Checking for updates…"),
                 "installed": info.get("installed_version") if info.get("installed_version") != info.get("installed") else None,
                 "has_old_build": bool(info.get("installed")) and info.get("installed_version") == info.get("installed"),
+                "installed_build": info.get("installed"),       # the build code, for an install with no version name
                 "offered": info.get("offered_version") or info.get("offered"),
                 "build": info.get("offered"), "releases": info.get("releases", []), "notes": info.get("notes", []),
                 "game": row.get("game", "Other"),
@@ -260,6 +263,7 @@ class Tray:
             "logo": self.logo, "signed_in": bool(session), "name": session and session.get("name"),
             "member": bool(self.updater.catalog.member()), "app_update": self.app_update, "crest": self.crest,
             "welcome": not session, "signin": dict(self.signin),
+            "guides_back": not session and self.updater.guides_withdrawn(),
             "addons": addons, "channel": self.settings.channel,
             "can_nightly": bool(session and session.get("prerelease")),
             "checking": self.checking, "checked": checked and ago(time.time() - checked),
@@ -308,7 +312,7 @@ class Tray:
     def set_wanted(self, package, on):
         """Tick or untick an addon. Ticking one ticks what it needs; unticking one unticks what needs it.
         Only what the catalog lets this account install can be ticked; anything can be unticked."""
-        if package not in PACKAGES or (on and not self.updater.catalog.installable(package)):
+        if not release.offered(package) or (on and not self.updater.catalog.installable(package)):
             return
         wanted = set(self.settings.packages)
         if on:

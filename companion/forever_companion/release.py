@@ -80,6 +80,31 @@ PACKAGES = {
     },
 }
 EDITION_NAMES = {"public": "Starting zones", "members": "Only Bans edition"}
+# The games whose addon the app offers, installs and updates. Classic Era is a test bed, not released (DECISIONS,
+# Releases and the owner, 2026-11-04): its card is not shown, and an Era addon already installed is left as it is,
+# not offered, ticked, updated or moved; only the access rule still applies to it, as to Forever: losing access
+# withdraws the members-only files the app put in. Put "era" back here to offer it again; the build tools keep both
+# packages either way.
+APP_GAMES = ("forever",)
+
+
+class era_offered:
+    """`with release.era_offered():` the app manages Classic Era's addon again, for the tests of that code."""
+
+    def __enter__(self):
+        global APP_GAMES
+        self.before, APP_GAMES = APP_GAMES, (*APP_GAMES, "era")
+
+    def __exit__(self, *exc):
+        global APP_GAMES
+        APP_GAMES = self.before
+
+
+def offered(package):
+    """Whether the app manages `package`: one of its addons, for a game in APP_GAMES."""
+    return package in PACKAGES and PACKAGES[package]["client"] in APP_GAMES
+
+
 RETIRED = ("forever-coach-ob", "forever-coach-mail")     # now inside forever-coach's members edition
 
 # Shown in the app's list but not installable yet. Guild Chronicle was here until the owner took it off

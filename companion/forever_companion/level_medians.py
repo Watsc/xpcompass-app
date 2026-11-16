@@ -67,6 +67,8 @@ class LevelMedians:
             if not isinstance(state.get(key), dict):
                 state[key] = {}
         state.setdefault("files", {})          # saved file -> [its size and time, the digest written]
+        if not isinstance(state.get("skipped"), dict):
+            state["skipped"] = {}              # saved file -> why the last write was left undone, for a report
         return state
 
     def _save(self):
@@ -157,8 +159,8 @@ class LevelMedians:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
             saved, spans = read_saved(text)
-        except (OSError, LuaError):
-            return                        # never rewrite what cannot be read
+        except (OSError, LuaError) as error:
+            return self._skipped(path, f"can't read it: {error}")   # never rewrite what cannot be read
         if same(saved.get(NAME), value):
             self.state["files"][str(path)] = [stat, digest]
             return
@@ -175,7 +177,7 @@ class LevelMedians:
         if value is not None:
             wanted[NAME] = value
         if not same(check, wanted):
-            return                        # never write what does not read back as meant
+            return self._skipped(path, "it didn't read back as meant")   # never write what does not
         temp = path.with_name(path.name + ".xpc-tmp")
         temp.write_text(new_text, encoding="utf-8", newline="\n")
         if self.running():                # the game started meanwhile: leave its file alone
@@ -183,6 +185,10 @@ class LevelMedians:
             return
         os.replace(temp, path)
         self.state["files"][str(path)] = [self._stat(path), digest]
+        self.state["skipped"].pop(str(path), None)
+
+    def _skipped(self, path, why):
+        self.state["skipped"][str(path)] = {"at": int(self.clock()), "why": why}
 
     @staticmethod
     def _stat(path):

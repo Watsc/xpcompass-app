@@ -17,7 +17,9 @@ nothing changed, except the time in meta.written, at most once an hour while the
 the server (the addons take a recent time to mean the app is running).
 
 Turning the setting off stops asking and writes Data.lua with no files, so every feature falls back to
-its defaults. After a failure the next try waits 30 minutes; a server with no key yet (503) is the
+its defaults. While the app has no Discord sign-in, a Data.lua already there says so in its meta (signin =
+true), whatever the setting; none is made for it: the addon then tells a guild member why their guild guides are gone (the app withdrew them,
+service.Updater.check) and that signing in in the app brings them back, with nothing asked of the network. After a failure the next try waits 30 minutes; a server with no key yet (503) is the
 same as nothing new.
 """
 import base64
@@ -221,12 +223,14 @@ def check_file(data, entry):
 
 
 def meta_lua(meta):
-    order = ("format", "version", "revision", "written", "channel")
+    order = ("format", "version", "revision", "written", "channel", "signin")
     parts = []
     for key in order:
         if key in meta:
             value = meta[key]
-            parts.append(f"{key} = {lua_string(value) if isinstance(value, str) else int(value)}")
+            text = ("true" if value else "false") if isinstance(value, bool) else \
+                lua_string(value) if isinstance(value, str) else int(value)
+            parts.append(f"{key} = {text}")
     return "{ " + ", ".join(parts) + " }"
 
 
@@ -470,9 +474,11 @@ class Channel:
         out, toc, data = output_paths(addons, game_id)
         if not data.exists() and (not on or not mine["version"]):
             return                          # nothing taken yet, or off with nothing to empty
+        signed_out = not self.signed_in()
         channel = self.channel(folder, game_id)
         files = {name: info["sha"] for name, info in sorted(mine["files"].items())} if on else {}
-        meta = {"format": 1, "version": mine["version"], "revision": mine["revision"]}
+        meta = {"format": 1, "version": mine["version"], "revision": mine["revision"],
+                **({"signin": True} if signed_out else {})}
         intent = json.dumps([str(data), meta, channel, files])
         try:
             stat = data.stat()

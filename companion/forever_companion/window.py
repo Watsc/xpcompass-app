@@ -1,5 +1,8 @@
 """The app's window: ui.html in a native window (pywebview on Edge WebView2, part of Windows 11).
 
+On Windows it has no title bar of Windows' own: ui.html's top bar is the title bar (it drags the window) and carries
+minimise and close. The Mac keeps its own title bar and buttons.
+
 The page asks Api.state() once a second and draws it; its buttons call the other Api methods.
 Closing the window hides it; the app keeps running in the tray until Quit.
 """
@@ -12,11 +15,16 @@ from pathlib import Path
 
 import webview
 
+from . import system
+
 # The About view's last line, the same words as the addon's About page (addon/XPCompass/Version.lua),
 # pointing to the privacy policy and terms, which hold the detail (AGENTS.md, "Privacy text").
 PRIVACY_URL = "https://xpcompass.com/privacy"
 TERMS_URL = "https://xpcompass.com/terms"
 PRIVACY_LINE = "Please refer to our Privacy Policy and Terms of Use."
+# ui.html's top bar is the title bar on Windows (the launcher's pywebview, 6.2.1, draws a frameless window with
+# Windows' shadow); the Mac keeps its own title bar with its traffic lights.
+FRAMELESS = not system.MAC
 
 
 def page():
@@ -49,7 +57,8 @@ class Api:
         self._app = app
 
     def state(self):
-        return dict(self._app.ui_state(), privacy_line=PRIVACY_LINE)
+        window = getattr(self._app, "window", None)
+        return dict(self._app.ui_state(), privacy_line=PRIVACY_LINE, frameless=bool(window and window.frameless))
 
     @_acts
     def open_privacy(self):
@@ -110,6 +119,14 @@ class Api:
         self._app.use_release(str(package))
 
     @_acts
+    def minimize(self):
+        self._app.window.minimize()
+
+    @_acts
+    def close_window(self):
+        self._app.window.put_away()        # to the tray, as the title bar's close did
+
+    @_acts
     def set_channel(self, channel):
         self._app.set_channel(str(channel))
 
@@ -125,20 +142,29 @@ class Api:
 class Window:
     def __init__(self, app, show):
         self.app = app
+        self.frameless = FRAMELESS
         self.native = webview.create_window("XPCompass", html=page(), js_api=Api(app), width=400, height=540,
-                                            min_size=(360, 420), hidden=not show, background_color="#14110d")
+                                            min_size=(360, 420), hidden=not show, background_color="#14110d",
+                                            frameless=self.frameless, easy_drag=False, shadow=True)
         self.native.events.closing += self._closing
         self.visible = bool(show)
 
     def _closing(self):
         if self.app.stopping:
             return True
+        self.put_away()
+        return False            # keep running in the tray
+
+    def put_away(self):
+        """Close to the tray: the window hides and the app keeps running until Quit."""
         self.native.hide()
         self.visible = False
         closed = getattr(self.app, "window_closed", None)
         if closed:
             closed()            # an update waiting for the window to close can switch now
-        return False            # keep running in the tray
+
+    def minimize(self):
+        self.native.minimize()
 
     def show(self):
         self.native.show()

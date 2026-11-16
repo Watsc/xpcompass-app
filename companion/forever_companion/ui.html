@@ -84,25 +84,122 @@
     filter: drop-shadow(0 0 1.5px var(--panel)) drop-shadow(0 0 1.5px var(--panel)); }
   .markbox.small .badge { right: -4px; bottom: -4px; width: 14px; height: 14px;
     filter: drop-shadow(0 0 1px var(--bg)) drop-shadow(0 0 1px var(--bg)); }
-  .modal { position: fixed; inset: 0; background: rgba(8, 6, 4, .78); display: flex; padding: 18px; }
-  .sheet { margin: auto; width: 100%; max-height: 100%; background: var(--bg); border: 1px solid var(--line-2);
-    border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
-  .sheet .head { display: flex; align-items: center; gap: 9px; padding: 14px 16px 8px; font-size: 16px; font-weight: 600; }
-  .sheet .head img { width: 24px; height: 24px; }
-  .sheet .body { overflow: auto; padding: 4px 16px 10px; }
-  .rel-date { color: var(--faint); font-size: 12px; margin: 12px 0 6px; }
-  .rel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
-  .rel h3 { margin: 6px 0 4px; font-size: 12px; letter-spacing: .8px; text-transform: uppercase; color: var(--gold); }
-  .rel ul { margin: 0 0 4px; padding-left: 18px; }
-  .rel li { margin: 3px 0; }
-  .sheet .foot { padding: 10px 16px 14px; text-align: center; }
+  /* What's new, straight on the window's ground under the card, no box: the newest version first, older ones below.
+     The window scrolls as one; its edges fade out where there is more above or below. */
+  .news { padding: 2px 4px 4px; }
+  main { --above: 0px; --below: 0px;
+    -webkit-mask-image: linear-gradient(transparent, #000 var(--above), #000 calc(100% - var(--below)), transparent);
+    mask-image: linear-gradient(transparent, #000 var(--above), #000 calc(100% - var(--below)), transparent); }
+  main.above { --above: 28px; }
+  main.more { --below: 46px; }
+  /* The scroll bar: a thin gold thumb only, no track or arrows. */
+  :root { color-scheme: dark; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-button { display: none; }
+  ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--gold) 35%, transparent); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--gold) 65%, transparent); }
+  .news h2 { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
+  .news .when { font-size: 11.5px; color: var(--faint); margin: 10px 0 2px; }
+  .news h2 + .when { margin-top: 0; }
+  .news .when .ver { font-family: Consolas, monospace; }
+  .news h3 { margin: 4px 0 0; font-size: 11px; font-weight: 600; color: var(--muted); }
+  .news ul { margin: 2px 0 0; padding-left: 16px; font-size: 12px; }
+  .news li { margin: 2px 0; }
   input[type=checkbox] { accent-color: var(--gold); width: 15px; height: 15px; }
+  .moon { width: 11px; height: 11px; flex: none; }
+  /* Our own minimise and close (Windows draws no title bar of its own): the top bar drags the window. */
+  header.framed { padding-right: 6px; gap: 8px; }
+  header.framed .chip { gap: 6px; }
+  header .chip .name, header .chip .tag { white-space: nowrap; }
+  .winbtns { display: flex; gap: 2px; margin-left: 4px; }
+  button.win { border: none; width: 28px; height: 26px; padding: 0; display: grid; place-items: center; border-radius: 6px; color: var(--muted); }
+  button.win svg { width: 11px; height: 11px; }
+  button.win:hover { background: rgba(255, 255, 255, .08); color: var(--text); }
+  button.win.close:hover { background: #b8281b; color: #fff; }     /* the raid roster's red */
+  .nightly-tag { display: inline-flex; align-items: center; gap: 4px; color: var(--night); font-weight: 700; white-space: nowrap; }
+  .switch { display: inline-flex; margin: 4px 0 6px; padding: 2px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); }
+  .switch button { border: none; border-radius: 6px; padding: 5px 16px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+  .switch button:hover { color: var(--text); }
+  .switch button[aria-checked="true"] { background: var(--gold); color: var(--gold-ink); font-weight: 600; cursor: default; }
+  .switch button.night[aria-checked="true"] { background: color-mix(in srgb, var(--night) 24%, #070605); color: #fff;
+    box-shadow: inset 0 0 0 1px var(--night), 0 0 12px rgba(184, 102, 240, .35); }
+  .switch button.night[aria-checked="false"] .moon path { fill: var(--muted); }
+  #sky { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #sky[hidden] { display: none; }
+  .app { position: relative; }
+
+  /* Nightly takes the raid roster site's look (server/forever_server/raids.html: its gold-rimmed frames, red
+     buttons and type) in black leather: the site's fills made neutral black (the owner, 12 Nov: "black leather not
+     brown"), a neutral grain and the gold rim carrying the leather; a purple night glow, the sky behind. Stable keeps the look above. */
+  :root { --night: #b866f0; }
+  body.nightly {
+    --bg: #090909; --panel: #121212; --line: #262626; --line-2: #3b3b3b;
+    --text: #f1e9d8; --muted: #ada28d; --faint: #8d8676;
+    --gold: #e6c067; --gold-hi: #f8e2a4; --gold-soft: #7a6234; --gold-ink: #1b1508;
+    --ok: #8cc276; --wait: #e6b450; --bad: #e58368;
+    --red: #8f1c13; --red-hi: #b8281b; --red-lo: #4a0a07;
+    --ridge: linear-gradient(168deg, #f6dd99 0%, #b98d39 20%, #6a4f1f 48%, #c59c47 76%, #f2d78c 100%);
+    --hide: linear-gradient(180deg, #161616 0%, #0d0d0d 100%);
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    --rule: linear-gradient(90deg, transparent, #a8843a 12%, #e6c067 50%, #a8843a 88%, transparent);
+    --font-display: "Friz Quadrata Std", "Friz Quadrata TT", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+    --font-mark: "Bahnschrift SemiCondensed", "Bahnschrift", "Avenir Next Condensed", "Arial Narrow", sans-serif;
+    background: var(--grain), radial-gradient(460px 300px at 50% -60px, rgba(184, 102, 240, .16), transparent 72%), var(--bg); }
+  body.nightly header, body.nightly footer { position: relative; z-index: 1; background: var(--grain), linear-gradient(180deg, #141414, #0a0a0a); border: none;
+    box-shadow: 0 1px 0 #000, 0 8px 22px rgba(0, 0, 0, .5); }
+  body.nightly footer { box-shadow: 0 -1px 0 #000, 0 -8px 22px rgba(0, 0, 0, .5); }
+  body.nightly header::after, body.nightly footer::before { content: ""; position: absolute; left: 0; right: 0; height: 1px; background: var(--rule); opacity: .8; }
+  body.nightly header::after { bottom: 0; }
+  body.nightly footer::before { top: 0; }
+  body.nightly header .title { font-family: var(--font-display); font-weight: 700; font-size: 16px; color: var(--gold); }
+  body.nightly .card { border: 2px solid transparent; border-radius: 12px;
+    background: var(--grain) padding-box, var(--hide) padding-box, var(--ridge) border-box;
+    box-shadow: 0 0 0 1px #000, inset 0 0 0 1px rgba(0, 0, 0, .9), inset 0 14px 22px -16px rgba(255, 255, 255, .06), 0 10px 24px rgba(0, 0, 0, .55); }
+  body.nightly .card .name, body.nightly .opt .label, body.nightly .centre h1 { font-family: var(--font-display); font-weight: 700; }
+  body.nightly .card .name { font-size: 14.5px; color: var(--gold-hi); text-shadow: 0 1px 1px #000; }
+  body.nightly .pill, body.nightly button.update, body.nightly button.chip-btn { font-family: var(--font-mark); letter-spacing: .08em; text-transform: uppercase;
+    font-size: 11px; font-weight: 700; padding: 3px 11px; background: rgba(0, 0, 0, .55); }
+  /* capitals have no descenders: trim the line box to the capitals so the word sits in the middle of its pill */
+  @supports (text-box: trim-both cap alphabetic) {
+    body.nightly .pill, body.nightly button.update, body.nightly button.chip-btn { line-height: 1; padding: 7px 11px 6px; text-box: trim-both cap alphabetic; } }
+  body.nightly .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+  body.nightly .pill.wait { color: var(--wait); border-color: color-mix(in srgb, var(--wait) 50%, transparent); }
+  body.nightly .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+  body.nightly button.update, body.nightly button.chip-btn, body.nightly .opt > div > button:not(.link) {
+    background: linear-gradient(180deg, #181818, #0a0a0a); color: var(--gold); border-color: var(--gold-soft); }
+  body.nightly button.update:hover, body.nightly button.chip-btn:hover, body.nightly .opt > div > button:not(.link):hover {
+    background: linear-gradient(180deg, var(--red-hi), var(--red-lo)); color: #ffe2a0; border-color: #d0a851; }
+  body.nightly button.primary { font-family: var(--font-display); font-weight: 700; letter-spacing: .02em; color: #ffe2a0; text-shadow: 0 1px 1px #000;
+    background: linear-gradient(180deg, var(--red-hi) 0%, var(--red) 45%, var(--red-lo) 100%); border: 1px solid #d0a851; border-radius: 7px;
+    box-shadow: 0 0 0 1px #000, inset 0 1px 0 rgba(255, 190, 150, .38), inset 0 -8px 12px -6px rgba(0, 0, 0, .55); }
+  body.nightly button.primary:hover { filter: brightness(1.22); border-color: var(--gold-hi); }
+  /* Update now is the window's one call to act: the raid roster's red button with its gold rim, at pill size. */
+  body.nightly button.update, body.nightly button.update:hover { font-family: var(--font-display); font-size: 12.5px; font-weight: 700; letter-spacing: .02em;
+    text-transform: none; line-height: 1.2; padding: 5px 13px; border-radius: 7px; color: #ffe2a0; text-shadow: 0 1px 1px #000; text-box: normal;
+    background: linear-gradient(180deg, var(--red-hi) 0%, var(--red) 45%, var(--red-lo) 100%); border: 1px solid #d0a851;
+    box-shadow: 0 0 0 1px #000, inset 0 1px 0 rgba(255, 190, 150, .38), inset 0 -8px 12px -6px rgba(0, 0, 0, .55), 0 3px 8px rgba(0, 0, 0, .45); }
+  body.nightly button.update:hover { filter: brightness(1.22); border-color: var(--gold-hi); }
+  body.nightly .switch { background: #070707; box-shadow: inset 0 2px 5px rgba(0, 0, 0, .7); }
+  body.nightly .switch button[aria-checked="true"] { background: linear-gradient(180deg, #f7dc93, #c79a3d); }
+  body.nightly .switch button.night[aria-checked="true"] { background: color-mix(in srgb, var(--night) 24%, #070707); }
+  body.nightly .nightly-tag { text-shadow: 0 0 8px rgba(184, 102, 240, .35); }
+  body.nightly .bar { background: #050505; box-shadow: inset 0 1px 2px #000; }
+  body.nightly .bar > div { background: linear-gradient(180deg, #f8e2a4, #c1933a); }
+  body.nightly .opts { gap: 8px; }
+  body.nightly .opt { padding: 8px 12px; border-radius: 10px; background: rgba(9, 9, 9, .85); border: 1px solid var(--line); }
+  body.nightly .news { text-shadow: 0 0 3px #000, 0 0 6px #000, 0 1px 1px #000; }   /* a dark halo keeps stars off the letters */
+  body.nightly .news h2 { font-family: var(--font-mark); font-size: 11.5px; }
 </style>
 </head>
 <body>
+<canvas id="sky" hidden aria-hidden="true"></canvas>
 <div class="app" id="app"></div>
 <script>
-let last = "", view = "main", news = null;
+let last = "", view = "main";
+// A white half moon before the word Nightly, drawn for XPCompass.
+const MOON = `<svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M7.28 1.44A6.6 6.6 0 1 0 14.32 9.89A5.6 5.6 0 0 1 7.28 1.44Z" fill="#fff"/></svg>`;
+const NIGHTLY = `<span class="nightly-tag">${MOON}Nightly</span>`;
 // Each game's badge, drawn for XPCompass (not Blizzard's logos), pinned to the corner of its app's mark.
 const BADGES = {
   "WoW Forever": `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#8a6a3a" stroke="#d8b45a" stroke-width="1"/>
@@ -132,9 +229,12 @@ function header(s) {
                   : `<div class="avatar">${esc((s.name || "?").slice(0, 1).toUpperCase())}</div>`}
        <div><div class="name">${esc(s.name || "Signed in")}</div>${s.member ? `<div class="tag">Only Bans member</div>` : ""}</div>`
     : (s.welcome || s.signin.busy ? "" : `<button class="link" data-act="sign_in">Sign in</button>`);
-  return `<header><img src="${s.logo}" alt=""><span class="title">XPCompass</span>
+  const frame = s.frameless ? `<div class="winbtns">
+      <button class="win" data-act="minimize" title="Minimise"><svg viewBox="0 0 12 12"><path d="M1.5 6.5h9" stroke="currentColor" stroke-width="1.3"/></svg></button>
+      <button class="win close" data-act="close_window" title="Close to the tray"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.3"/></svg></button></div>` : "";
+  return `<header class="pywebview-drag-region ${s.frameless ? "framed" : ""}"><img src="${s.logo}" alt=""><span class="title">XPCompass</span>
     <div class="chip">${who}${s.welcome || s.signin.busy ? "" :
-      `<button class="icon-btn" data-view="${view === "main" ? "options" : "main"}" title="Options">⚙</button>`}</div></header>`;
+      `<button class="icon-btn" data-view="${view === "main" ? "options" : "main"}" title="Options">⚙</button>`}${frame}</div></header>`;
 }
 
 function pill(a) {
@@ -156,37 +256,37 @@ function card(a, s) {
   const pct = a.progress == null ? null : Math.round(a.progress * 100);
   return `<div class="card">
     <div class="top">${mark(a, s)}
-      <div class="grow"><div class="name">${esc(a.name)}</div><div class="sub">${appLine(a)}${a.testing ? ` · <span class="tag">Nightly build</span>` : ""}</div></div>
+      <div class="grow"><div class="name">${esc(a.name)}</div><div class="sub">${appLine(a)}${a.testing ? ` · ${NIGHTLY}` : ""}</div></div>
       ${pill(a)}</div>
     ${busy ? `<div class="progress"><div class="bar ${pct == null ? "busy" : ""}"><div style="width:${pct || 0}%"></div></div>
       <div class="small"><span>${a.state === "installing" ? "Installing…" : "Downloading…"}</span><span>${pct == null ? "" : pct + "%"}</span></div></div>` : ""}
     ${a.state === "error" || a.state === "locked" ? `<div class="note">${esc(a.text)}</div>` : ""}
     ${a.state === "testing" ? `<div class="note">${esc(a.text)} <button class="link" data-act="use_release" data-id="${a.id}"
-      title="Use stable updates; close WoW to install safely">Switch to stable</button></div>` : ""}
+      title="Use Stable updates; it installs when you close the game">Switch to Stable</button></div>` : ""}
     ${a.pick ? `<div style="margin-top:6px"><button class="primary" data-act="pick_game" data-id="${a.pick}">Choose folder</button></div>` : ""}
     ${a.upgrade ? `<div class="note gold">${esc(a.upgrade.text)}</div>` : ""}
-    <div class="meta">${versionLine(a)}
-      ${a.releases && a.releases.length ? ` · <button class="link" data-news="${a.id}">What's new</button>` : ""}</div>
+    <div class="meta">${versionLine(a)}</div>
   </div>`;
 }
 
-function newsSheet(s) {
-  const a = s.addons.find(x => x.id === news);
+// What's new for the addon on the first card: every version the build carries, newest first.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const day = d => /^\d{4}-\d\d-\d\d/.test(d || "") ? `${+d.slice(8, 10)} ${MONTHS[+d.slice(5, 7) - 1]}` : esc(d);
+function whatsNew(s) {
+  const a = s.addons.find(x => x.available && x.wanted && x.releases && x.releases.length);
   if (!a) return "";
-  return `<div class="modal"><div class="sheet">
-    <div class="head"><img src="${s.logo}" alt="">What's new in ${esc(a.name)}</div>
-    <div class="body">${a.releases.map(r => `
-      <div class="rel-date">${esc(r.date)}${r.date ? " · " : ""}Version ${esc(r.version)}</div>
-      <div class="rel">${r.notes.map(sec => `<h3>${esc(sec.title)}</h3>
-        <ul>${sec.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul>`).join("")}</div>`).join("")}</div>
-    <div class="foot"><button class="primary" data-close>Close</button></div>
-  </div></div>`;
+  return `<section class="news"><h2>What's new</h2>${a.releases.map(r => `
+    <div class="when">Version <span class="ver">${esc(r.version)}</span>${r.date ? ` · ${day(r.date)}` : ""}</div>
+    ${r.notes.map(sec => `${r.notes.length > 1 ? `<h3>${esc(sec.title)}</h3>` : ""}
+      <ul>${sec.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul>`).join("")}`).join("")}</section>`;
 }
 
 function versionLine(a) {
   const v = x => `<span class="ver">${esc(x)}</span>`;
   if (a.installed && a.offered && a.installed !== a.offered) return `Version ${v(a.installed)} → ${v(a.offered)}`;
   if (a.installed) return `Version ${v(a.installed)}`;
+  // An install newer than the server's, with no version name (a build put in by hand), is what it is: never "Update to" beside "Up to date".
+  if (a.state === "current" && a.installed_build) return `Version ${v(a.installed_build)}`;
   if (a.offered && (a.has_old_build || a.state !== "current")) return `Update to ${v(a.offered)}`;
   if (a.offered) return `Version ${v(a.offered)}`;
   return "Not installed yet";
@@ -213,7 +313,8 @@ function mainView(s) {
        return available.filter(here).map(a => card(a, s)).join("");
      }).join("")}
     ${locked.length ? `<div>${locked.map(a => lockedLine(a, s)).join("")}</div>` : ""}
-  </main>${footer(s)}${news ? newsSheet(s) : ""}`;
+    ${whatsNew(s)}
+  </main>${footer(s)}`;
 }
 
 function options(s) {
@@ -226,10 +327,10 @@ function options(s) {
       <div style="margin-top:6px"><button data-act="pick_game" data-id="${c.id}">Change</button>
         ${c.path ? `<button data-act="open_addons" data-id="${c.id}">Open AddOns</button>` : ""}
         ${c.chosen ? `<button class="link" data-act="use_found_client" data-id="${c.id}">Find it automatically</button>` : ""}</div></div>`).join("")}
-    <div class="opt"><div class="label">Build channel · ${s.channel === "nightly" ? "Nightly" : "Stable"}</div>
-      <div class="small">Stable receives fixes and proven features. Nightly previews new features for the addon and app.</div>
-      <button data-act="set_channel" data-id="stable" ${s.channel === "stable" ? "disabled" : ""}>Stable</button>
-      ${s.can_nightly || s.channel === "nightly" ? `<button data-act="set_channel" data-id="nightly" ${s.channel === "nightly" || !s.can_nightly ? "disabled" : ""}>Nightly</button>` : ""}</div>
+    ${s.can_nightly || s.channel === "nightly" ? `<div class="opt"><div class="label">Build</div>
+      <div class="switch" role="radiogroup" aria-label="Build">${[["stable", "Stable", ""], ["nightly", MOON + "Nightly", "night"]].map(([id, text, cls]) =>
+        `<button role="radio" class="${cls}" aria-checked="${s.channel === id}" ${s.channel === id ? "" : `data-act="set_channel" data-id="${id}"`}>${text}</button>`).join("")}</div>
+      <div class="small">Stable is the steadiest build. Nightly gets new features first, before they are fully proven.</div></div>` : ""}
     <div class="opt"><label class="check"><input type="checkbox" data-act="toggle_start" ${s.start_with_windows ? "checked" : ""}>
       ${esc(s.login_label || "Start with Windows")}</label></div>
     <div class="opt"><label class="check"><input type="checkbox" data-act="toggle_data" ${s.data_channel ? "checked" : ""}>
@@ -280,8 +381,10 @@ function footer(s) {
 function welcome(s) {
   return `<div class="centre"><div>
     <img src="${s.logo}" alt="" style="width:52px;height:52px">
-    <h1>Keep your guides up to date</h1>
-    <p>Sign in with Discord to start. Only Bans members get every guide.</p>
+    ${s.guides_back ? `<h1>Sign in to get your guild guides back</h1>
+    <p>XPCompass lost its Discord sign-in, so it took your guild guides out of the game. Sign in and they come back.</p>`
+    : `<h1>Keep your guides up to date</h1>
+    <p>Sign in with Discord to start. Only Bans members get every guide.</p>`}
     ${s.signin.error ? `<p class="error">${esc(s.signin.error)}</p>` : ""}
     <button class="primary" data-act="sign_in">Sign in with Discord</button>
     <p class="small" style="margin:12px 0 6px">Opens in your browser. XPCompass never sees your password.</p>
@@ -299,13 +402,115 @@ function waiting() {
 
 function render(s) {
   const body = s.signin.busy ? waiting() : s.welcome ? welcome(s) : view === "options" ? options(s) : view === "about" ? about(s) : mainView(s);
+  document.body.classList.toggle("nightly", s.channel === "nightly");
+  sky.set(s.channel === "nightly");
+  const before = document.querySelector("main"), kept = before && before.dataset.view === view ? before.scrollTop : 0;
   document.getElementById("app").innerHTML = header(s) + body;
+  const page = document.querySelector("main");
+  if (page) { page.dataset.view = view; page.scrollTop = kept; fade(page); }    // a redraw keeps the reader's place
 }
+// The window's body fades out at an edge while there is more to scroll to that way.
+const fade = page => {
+  page.classList.toggle("above", page.scrollTop > 2);
+  page.classList.toggle("more", page.scrollTop + page.clientHeight < page.scrollHeight - 2);
+};
+document.addEventListener("scroll", e => { if (e.target.tagName === "MAIN") fade(e.target); }, true);
+
+// Nightly's night sky: one small canvas behind the window. Stars twinkle and drift slowly, only while the
+// window has focus and shows, with now and then a shooting star. On blur, hidden, minimised or with reduced motion it is a still picture:
+// the frame request is cancelled, so nothing runs until focus comes back (no timer, no painting).
+const SKY = {drift: 1, meteors: true};
+const sky = (() => {
+  const canvas = document.getElementById("sky"), ctx = canvas.getContext("2d");
+  const calm = matchMedia("(prefers-reduced-motion: reduce)");
+  let on = false, stars = [], frame = 0, then = 0, t = 0, w = 0, h = 0, drawn = 0, meteors = [], next = .5;
+  const TINTS = ["241,233,216", "241,233,216", "241,233,216", "248,226,164", "214,182,245"];   // text, gold, a little purple
+  function size() {
+    const ratio = window.devicePixelRatio || 1;
+    w = innerWidth; h = innerHeight;
+    if (!w || !h) return;
+    canvas.width = Math.round(w * ratio); canvas.height = Math.round(h * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    let seed = 20261112;
+    const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+    stars = Array.from({length: Math.round(w * h / 1900)}, () => {
+      const near = rnd() ** 3;                      // most stars far and faint, a few near and bright
+      return {x: rnd() * w, y: rnd() * h, r: .5 + near * 1.2, a: .4 + near * .6, v: (1.5 + near * 4.5) * SKY.drift,
+              f: 2 * Math.PI / (2.5 + rnd() * 3.5), p: rnd() * 6.3, tint: TINTS[Math.floor(rnd() * TINTS.length)]};
+    });
+  }
+  // Shooting stars, heaps of them (Nightly is the fast updates): white streaks falling across the sky every second
+  // or so, several at once, each gone in about half a second.
+  function shoot() {
+    if (t >= next) {
+      const angle = (.3 + Math.random() * .4) * (Math.random() < .5 ? 1 : -1), speed = 650 + Math.random() * 450;
+      meteors.push({x: w * Math.random(), y: h * Math.random() * .6, vx: Math.sin(angle) * speed,
+                    vy: Math.cos(angle) * speed * .6, born: t, life: .35 + Math.random() * .4, len: 50 + Math.random() * 70});
+      next = t + .25 + Math.random() * 1.1;
+    }
+    meteors = meteors.filter(m => t - m.born < m.life);
+    for (const m of meteors) {
+      const age = (t - m.born) / m.life, x = m.x + m.vx * (t - m.born), y = m.y + m.vy * (t - m.born);
+      const speed = Math.hypot(m.vx, m.vy), tx = x - m.vx / speed * m.len, ty = y - m.vy / speed * m.len;
+      const tail = ctx.createLinearGradient(x, y, tx, ty);
+      tail.addColorStop(0, "rgba(255,255,255,.9)"); tail.addColorStop(1, "rgba(214,182,245,0)");
+      ctx.globalAlpha = Math.sin(Math.PI * age);       // fades in and out
+      ctx.strokeStyle = tail; ctx.lineWidth = 1.2; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(tx, ty); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+  function draw(moving) {
+    if (!w || !h) return;
+    drawn++;
+    ctx.clearRect(0, 0, w, h);
+    for (const s of stars) {
+      const x = ((s.x + t * s.v) % (w + 4) + w + 4) % (w + 4) - 2;
+      ctx.globalAlpha = s.a * (.5 + .5 * Math.sin(t * s.f + s.p));
+      ctx.fillStyle = `rgb(${s.tint})`;
+      if (s.r < .8) ctx.fillRect(x, s.y, s.r * 1.6, s.r * 1.6);
+      else { ctx.beginPath(); ctx.arc(x, s.y, s.r, 0, 6.2832); ctx.fill(); }
+    }
+    ctx.globalAlpha = 1;
+    if (moving && SKY.meteors) shoot();
+  }
+  function tick(now) {
+    frame = requestAnimationFrame(tick);
+    if (!then) then = now;
+    if (now - then < 40) return;                    // about 25 frames a second is plenty for drifting stars
+    t += Math.min(now - then, 100) / 1000;
+    then = now;
+    draw(true);
+  }
+  const moving = () => on && !calm.matches && document.visibilityState === "visible" && document.hasFocus();
+  function update() {
+    if (moving()) {
+      if (!frame) { then = 0; frame = requestAnimationFrame(tick); }
+    } else {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      if (on) draw();                               // one still picture
+    }
+  }
+  for (const event of ["focus", "blur"]) addEventListener(event, update);
+  document.addEventListener("visibilitychange", update);
+  calm.addEventListener("change", update);
+  addEventListener("resize", () => { if (on) { size(); update(); } });
+  return {
+    set(night) {
+      if (night === on) return;
+      on = night; canvas.hidden = !night;
+      if (night) size();
+      update();
+    },
+    running: () => frame !== 0, drawn: () => drawn,
+  };
+})();
 
 async function refresh() {
   try {
     const s = await window.pywebview.api.state();
-    const text = JSON.stringify(s) + view + news;
+    const text = JSON.stringify(s) + view;
     if (text !== last) { last = text; render(s); }
   } catch (e) { /* the app is busy; try again next tick */ }
 }
@@ -313,9 +518,6 @@ async function refresh() {
 document.addEventListener("click", e => {
   const tab = e.target.closest("[data-view]");
   if (tab) { view = tab.dataset.view; last = ""; refresh(); return; }
-  const opener = e.target.closest("[data-news]");
-  if (opener) { news = opener.dataset.news; last = ""; refresh(); return; }
-  if (e.target.closest("[data-close]") || e.target.classList.contains("modal")) { news = null; last = ""; refresh(); return; }
   const el = e.target.closest("[data-act]");
   if (!el) return;
   const act = el.dataset.act;
@@ -326,6 +528,8 @@ document.addEventListener("click", e => {
   else window.pywebview.api[act](...(el.dataset.id ? [el.dataset.id] : []));
   setTimeout(refresh, 150);
 });
+// A press on a button in the top bar is a click, never the start of dragging the window.
+document.addEventListener("mousedown", e => { if (e.target.closest("button")) e.stopPropagation(); }, true);
 window.addEventListener("pywebviewready", () => { refresh(); setInterval(refresh, 500); });
 </script>
 </body>

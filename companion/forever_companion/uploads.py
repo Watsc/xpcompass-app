@@ -538,10 +538,21 @@ class UploadError(Exception):
     pass
 
 
+def as_table(value):
+    """A list read from a saved file as the Lua table it is: {1: first, 2: second, ...}, a nil left out."""
+    return {index: item for index, item in enumerate(value, 1) if item is not None}
+
+
 def same(a, b):
-    """Equal as Lua sees it: an empty table is an empty table, list or not."""
+    """Equal as Lua sees it: an empty table is an empty table, list or not, and a list is the table keyed 1, 2, 3...
+    (read_saved gives a table whose keys run 1 to n as a list: {[1] = 680, [2] = 500} reads back as [680, 500],
+    which the level medians' read-back check took for a different value and never wrote again, 10 November)."""
     if isinstance(a, (dict, list)) and isinstance(b, (dict, list)) and not a and not b:
         return True
+    if isinstance(a, list) and isinstance(b, dict):
+        a = as_table(a)
+    elif isinstance(a, dict) and isinstance(b, list):
+        b = as_table(b)
     if isinstance(a, dict) and isinstance(b, dict):
         return a.keys() == b.keys() and all(same(a[k], b[k]) for k in a)
     if isinstance(a, list) and isinstance(b, list):
