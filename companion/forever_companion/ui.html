@@ -4,26 +4,47 @@
 <meta charset="utf-8">
 <title>XPCompass</title>
 <style>
+  /* One look for both builds: the raid roster site's (server/forever_server/raids.html: its gold-rimmed frames, red
+     buttons and type) in black leather: the site's fills made neutral black (the owner, 12 Nov: "black leather not
+     brown"), a neutral grain and the gold rim carrying the leather. Each build wears its own colour (the owner,
+     18 Nov: "Stable in gold"): Stable gold, Nightly the raid's purple, in the light at the top of the window, the
+     word on the card and the chosen side of the Build switch. Nightly alone has the night sky behind. */
   :root {
-    --bg: #14110d; --panel: #1d1913; --line: #33291f; --line-2: #4a3e2e;
-    --text: #ece4d4; --muted: #a59a86; --faint: #7a705e;
-    --gold: #d8b45a; --gold-ink: #1b1508; --ok: #8fc48a; --wait: #e2b35c; --bad: #e08a7a;
+    --bg: #090909; --panel: #121212; --line: #262626; --line-2: #3b3b3b;
+    --text: #f1e9d8; --muted: #ada28d; --faint: #8d8676;
+    --gold: #e6c067; --gold-hi: #f8e2a4; --gold-soft: #7a6234; --gold-ink: #1b1508;
+    --ok: #8cc276; --wait: #e6b450; --bad: #e58368;
+    --red: #8f1c13; --red-hi: #b8281b; --red-lo: #4a0a07;
+    --night: #b866f0; --glow: rgba(230, 192, 103, .09);
+    --ridge: linear-gradient(168deg, #f6dd99 0%, #b98d39 20%, #6a4f1f 48%, #c59c47 76%, #f2d78c 100%);
+    --hide: linear-gradient(180deg, #161616 0%, #0d0d0d 100%);
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    --rule: linear-gradient(90deg, transparent, #a8843a 12%, #e6c067 50%, #a8843a 88%, transparent);
+    --font-display: "Friz Quadrata Std", "Friz Quadrata TT", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+    --font-mark: "Bahnschrift SemiCondensed", "Bahnschrift", "Avenir Next Condensed", "Arial Narrow", sans-serif;
   }
+  body.nightly { --glow: rgba(184, 102, 240, .16); }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
     font: 13px/1.45 "Segoe UI", system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+  body { background: var(--grain), radial-gradient(460px 300px at 50% -60px, var(--glow), transparent 72%), var(--bg); }
   button { font: inherit; color: var(--text); background: transparent; border: 1px solid var(--line-2);
     border-radius: 6px; padding: 5px 12px; cursor: pointer; }
   button:hover { border-color: var(--gold); }
-  button.primary { background: var(--gold); color: var(--gold-ink); border-color: var(--gold); font-weight: 600; }
   button.link { border: none; padding: 0; color: var(--gold); }
   button.link:hover { text-decoration: underline; }
   button.icon-btn { border: none; padding: 2px 6px; color: var(--muted); font-size: 16px; }
   button.icon-btn:hover { color: var(--text); }
   .app { display: flex; flex-direction: column; height: 100%; }
-  header { display: flex; align-items: center; gap: 9px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  header { display: flex; align-items: center; gap: 9px; padding: 12px 14px; }
+  header, footer { position: relative; z-index: 1; background: var(--grain), linear-gradient(180deg, #141414, #0a0a0a); border: none;
+    box-shadow: 0 1px 0 #000, 0 8px 22px rgba(0, 0, 0, .5); }
+  footer { box-shadow: 0 -1px 0 #000, 0 -8px 22px rgba(0, 0, 0, .5); }
+  header::after, footer::before { content: ""; position: absolute; left: 0; right: 0; height: 1px; background: var(--rule); opacity: .8; }
+  header::after { bottom: 0; }
+  footer::before { top: 0; }
   header img { width: 32px; height: 32px; }
-  header .title { font-size: 15px; font-weight: 600; }
+  header .title { font-family: var(--font-display); font-weight: 700; font-size: 16px; color: var(--gold); }
   .chip { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .avatar img { width: 28px; height: 28px; }
   .avatar.crest { border: none; background: none; }
@@ -32,7 +53,9 @@
   .chip .name { font-size: 12.5px; line-height: 1.2; }
   .tag { font-size: 10.5px; color: var(--gold); letter-spacing: .3px; }
   main { flex: 1; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .card { padding: 12px 14px; border: 2px solid transparent; border-radius: 12px;
+    background: var(--grain) padding-box, var(--hide) padding-box, var(--ridge) border-box;
+    box-shadow: 0 0 0 1px #000, inset 0 0 0 1px rgba(0, 0, 0, .9), inset 0 14px 22px -16px rgba(255, 255, 255, .06), 0 10px 24px rgba(0, 0, 0, .55); }
   .top { display: flex; gap: 10px; align-items: center; }
   .ring { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--gold); flex: none;
     display: grid; place-items: center; color: var(--gold); font-weight: 700; font-size: 11px; }
@@ -40,18 +63,36 @@
   .mark { width: 42px; height: 42px; flex: none; }
   .mark.small { width: 26px; height: 26px; }
   .name { font-weight: 600; }
+  .card .name, .opt .label, .centre h1 { font-family: var(--font-display); font-weight: 700; }
+  .card .name { font-size: 14.5px; color: var(--gold-hi); text-shadow: 0 1px 1px #000; }
   .sub { color: var(--muted); font-size: 12px; }
   .grow { flex: 1; min-width: 0; }
-  .pill, button.update, button.chip-btn { display: inline-block; padding: 4px 12px; border-radius: 99px; border: 1px solid;
-    font-size: 12px; line-height: 1.35; white-space: nowrap; }
-  button.chip-btn { border-color: var(--line-2); color: var(--text); }
-  button.chip-btn:hover { border-color: var(--gold); }
-  .pill.ok { color: var(--ok); border-color: #4d6b49; }
-  .pill.wait { color: var(--wait); border-color: #6e5a33; }
-  .pill.bad { color: var(--bad); border-color: #6e4239; }
+  .pill, button.update, button.chip-btn { display: inline-block; padding: 3px 11px; border-radius: 99px; border: 1px solid;
+    font-family: var(--font-mark); letter-spacing: .08em; text-transform: uppercase; font-size: 11px; font-weight: 700;
+    line-height: 1.35; white-space: nowrap; background: rgba(0, 0, 0, .55); }
+  /* capitals have no descenders: trim the line box to the capitals so the word sits in the middle of its pill */
+  @supports (text-box: trim-both cap alphabetic) {
+    .pill, button.update, button.chip-btn { line-height: 1; padding: 7px 11px 6px; text-box: trim-both cap alphabetic; } }
+  .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+  .pill.wait { color: var(--wait); border-color: color-mix(in srgb, var(--wait) 50%, transparent); }
+  .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
   .pill.dim { color: var(--faint); border-color: var(--line-2); }
-  .bar { height: 5px; background: var(--bg); border-radius: 3px; overflow: hidden; }
-  .bar > div { height: 100%; background: var(--gold); transition: width .3s; }
+  button.update, button.chip-btn, .opt > div > button:not(.link) {
+    background: linear-gradient(180deg, #181818, #0a0a0a); color: var(--gold); border-color: var(--gold-soft); }
+  button.update:hover, button.chip-btn:hover, .opt > div > button:not(.link):hover {
+    background: linear-gradient(180deg, var(--red-hi), var(--red-lo)); color: #ffe2a0; border-color: #d0a851; }
+  button.primary { font-family: var(--font-display); font-weight: 700; letter-spacing: .02em; color: #ffe2a0; text-shadow: 0 1px 1px #000;
+    background: linear-gradient(180deg, var(--red-hi) 0%, var(--red) 45%, var(--red-lo) 100%); border: 1px solid #d0a851; border-radius: 7px;
+    box-shadow: 0 0 0 1px #000, inset 0 1px 0 rgba(255, 190, 150, .38), inset 0 -8px 12px -6px rgba(0, 0, 0, .55); }
+  button.primary:hover { filter: brightness(1.22); border-color: var(--gold-hi); }
+  /* Update now is the window's one call to act: the raid roster's red button with its gold rim, at pill size. */
+  button.update, button.update:hover { font-family: var(--font-display); font-size: 12.5px; font-weight: 700; letter-spacing: .02em;
+    text-transform: none; line-height: 1.2; padding: 5px 13px; border-radius: 7px; color: #ffe2a0; text-shadow: 0 1px 1px #000; text-box: normal;
+    background: linear-gradient(180deg, var(--red-hi) 0%, var(--red) 45%, var(--red-lo) 100%); border: 1px solid #d0a851;
+    box-shadow: 0 0 0 1px #000, inset 0 1px 0 rgba(255, 190, 150, .38), inset 0 -8px 12px -6px rgba(0, 0, 0, .55), 0 3px 8px rgba(0, 0, 0, .45); }
+  button.update:hover { filter: brightness(1.22); border-color: var(--gold-hi); }
+  .bar { height: 5px; background: #050505; border-radius: 3px; overflow: hidden; box-shadow: inset 0 1px 2px #000; }
+  .bar > div { height: 100%; background: linear-gradient(180deg, #f8e2a4, #c1933a); transition: width .3s; }
   .bar.busy > div { width: 35% !important; animation: slide 1.2s infinite ease-in-out; }
   @keyframes slide { from { margin-left: -35%; } to { margin-left: 100%; } }
   .progress { margin-top: 10px; }
@@ -63,21 +104,19 @@
   .notes { margin: 8px 0 0; padding-left: 16px; font-size: 12px; color: var(--text); }
   .line { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-top: 1px solid var(--line); color: var(--faint); }
   .small { font-size: 11.5px; color: var(--faint); }
-  footer { display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-top: 1px solid var(--line);
-    font-size: 11.5px; color: var(--muted); }
+  footer { display: flex; align-items: center; gap: 10px; padding: 7px 14px; font-size: 11.5px; color: var(--muted); }
   footer .text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   footer .bar { width: 90px; }
   .error { color: var(--bad); }
   .centre { flex: 1; display: grid; place-items: center; text-align: center; padding: 24px; }
-  .centre h1 { font-size: 18px; font-weight: 600; margin: 10px 0 8px; }
+  .centre h1 { font-size: 18px; margin: 10px 0 8px; }
   .centre p { color: var(--muted); margin: 0 0 16px; }
   .centre .primary { padding: 9px 22px; }
-  .opts { display: grid; gap: 16px; }
-  .opt .label { font-weight: 600; margin-bottom: 3px; }
+  .opts { display: grid; gap: 8px; }
+  .opt { padding: 8px 12px; border-radius: 10px; background: rgba(9, 9, 9, .85); border: 1px solid var(--line); }
+  .opt .label { margin-bottom: 3px; }
   .path { font-family: Consolas, monospace; font-size: 11.5px; word-break: break-all; }
   label.check { display: flex; gap: 8px; align-items: center; cursor: pointer; }
-  button.update { border-color: var(--gold); color: var(--gold); }
-  button.update:hover { background: var(--gold); color: var(--gold-ink); }
   .markbox { position: relative; flex: none; display: flex; }
   .markbox.dim { filter: grayscale(1) brightness(.6); }
   .badge { position: absolute; right: -5px; bottom: -5px; width: 21px; height: 21px;
@@ -87,6 +126,7 @@
   /* What's new, straight on the window's ground under the card, no box: the newest version first, older ones below.
      The window scrolls as one; its edges fade out where there is more above or below. */
   .news { padding: 2px 4px 4px; }
+  body.nightly .news { text-shadow: 0 0 3px #000, 0 0 6px #000, 0 1px 1px #000; }   /* a dark halo keeps stars off the letters */
   main { --above: 0px; --below: 0px;
     -webkit-mask-image: linear-gradient(transparent, #000 var(--above), #000 calc(100% - var(--below)), transparent);
     mask-image: linear-gradient(transparent, #000 var(--above), #000 calc(100% - var(--below)), transparent); }
@@ -99,7 +139,7 @@
   ::-webkit-scrollbar-button { display: none; }
   ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--gold) 35%, transparent); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--gold) 65%, transparent); }
-  .news h2 { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
+  .news h2 { margin: 0 0 6px; font-family: var(--font-mark); font-size: 11.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
   .news .when { font-size: 11.5px; color: var(--faint); margin: 10px 0 2px; }
   .news h2 + .when { margin-top: 0; }
   .news .when .ver { font-family: Consolas, monospace; }
@@ -117,79 +157,27 @@
   button.win svg { width: 11px; height: 11px; }
   button.win:hover { background: rgba(255, 255, 255, .08); color: var(--text); }
   button.win.close:hover { background: #b8281b; color: #fff; }     /* the raid roster's red */
-  .nightly-tag { display: inline-flex; align-items: center; gap: 4px; color: var(--night); font-weight: 700; white-space: nowrap; }
-  .switch { display: inline-flex; margin: 4px 0 6px; padding: 2px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); }
-  .switch button { border: none; border-radius: 6px; padding: 5px 16px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
-  .switch button:hover { color: var(--text); }
-  .switch button[aria-checked="true"] { background: var(--gold); color: var(--gold-ink); font-weight: 600; cursor: default; }
-  .switch button.night[aria-checked="true"] { background: color-mix(in srgb, var(--night) 24%, #070605); color: #fff;
+  /* The build a card holds, said in its colour: Stable in gold, Nightly in the raid's purple after its moon. */
+  .nightly-tag, .stable-tag { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; white-space: nowrap; }
+  .nightly-tag { color: var(--night); text-shadow: 0 0 8px rgba(184, 102, 240, .35); }
+  .stable-tag { color: var(--gold); text-shadow: 0 0 8px rgba(230, 192, 103, .35); }
+  /* The Build switch. Its buttons are also the options' buttons (.opt > div > button above), which gives the side
+     not chosen its dark face, gold word and red hover; the chosen side wears its build's colour, and Stable's rule
+     names .opt and :not(.night) to rank above that one, at rest and under the pointer. */
+  .switch { display: inline-flex; margin: 4px 0 6px; padding: 2px; border: 1px solid var(--line-2); border-radius: 8px;
+    background: #070707; box-shadow: inset 0 2px 5px rgba(0, 0, 0, .7); }
+  .switch button { border: none; border-radius: 6px; padding: 5px 16px; display: inline-flex; align-items: center; gap: 6px; }
+  .switch button[aria-checked="true"] { font-weight: 600; cursor: default; }
+  .opt .switch button:not(.night)[aria-checked="true"] { background: linear-gradient(180deg, #f7dc93, #c79a3d); color: var(--gold-ink); }
+  .switch button.night[aria-checked="true"] { background: color-mix(in srgb, var(--night) 24%, #070707);
     box-shadow: inset 0 0 0 1px var(--night), 0 0 12px rgba(184, 102, 240, .35); }
   .switch button.night[aria-checked="false"] .moon path { fill: var(--muted); }
+  /* Why the last click did nothing: under the top bar on every page, until OK or the next click that works. */
+  .problem { position: relative; z-index: 1; display: flex; align-items: flex-start; gap: 10px; padding: 8px 14px;
+    background: var(--panel); border-bottom: 1px solid var(--line); color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
   #sky { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   #sky[hidden] { display: none; }
   .app { position: relative; }
-
-  /* Nightly takes the raid roster site's look (server/forever_server/raids.html: its gold-rimmed frames, red
-     buttons and type) in black leather: the site's fills made neutral black (the owner, 12 Nov: "black leather not
-     brown"), a neutral grain and the gold rim carrying the leather; a purple night glow, the sky behind. Stable keeps the look above. */
-  :root { --night: #b866f0; }
-  body.nightly {
-    --bg: #090909; --panel: #121212; --line: #262626; --line-2: #3b3b3b;
-    --text: #f1e9d8; --muted: #ada28d; --faint: #8d8676;
-    --gold: #e6c067; --gold-hi: #f8e2a4; --gold-soft: #7a6234; --gold-ink: #1b1508;
-    --ok: #8cc276; --wait: #e6b450; --bad: #e58368;
-    --red: #8f1c13; --red-hi: #b8281b; --red-lo: #4a0a07;
-    --ridge: linear-gradient(168deg, #f6dd99 0%, #b98d39 20%, #6a4f1f 48%, #c59c47 76%, #f2d78c 100%);
-    --hide: linear-gradient(180deg, #161616 0%, #0d0d0d 100%);
-    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    --rule: linear-gradient(90deg, transparent, #a8843a 12%, #e6c067 50%, #a8843a 88%, transparent);
-    --font-display: "Friz Quadrata Std", "Friz Quadrata TT", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
-    --font-mark: "Bahnschrift SemiCondensed", "Bahnschrift", "Avenir Next Condensed", "Arial Narrow", sans-serif;
-    background: var(--grain), radial-gradient(460px 300px at 50% -60px, rgba(184, 102, 240, .16), transparent 72%), var(--bg); }
-  body.nightly header, body.nightly footer { position: relative; z-index: 1; background: var(--grain), linear-gradient(180deg, #141414, #0a0a0a); border: none;
-    box-shadow: 0 1px 0 #000, 0 8px 22px rgba(0, 0, 0, .5); }
-  body.nightly footer { box-shadow: 0 -1px 0 #000, 0 -8px 22px rgba(0, 0, 0, .5); }
-  body.nightly header::after, body.nightly footer::before { content: ""; position: absolute; left: 0; right: 0; height: 1px; background: var(--rule); opacity: .8; }
-  body.nightly header::after { bottom: 0; }
-  body.nightly footer::before { top: 0; }
-  body.nightly header .title { font-family: var(--font-display); font-weight: 700; font-size: 16px; color: var(--gold); }
-  body.nightly .card { border: 2px solid transparent; border-radius: 12px;
-    background: var(--grain) padding-box, var(--hide) padding-box, var(--ridge) border-box;
-    box-shadow: 0 0 0 1px #000, inset 0 0 0 1px rgba(0, 0, 0, .9), inset 0 14px 22px -16px rgba(255, 255, 255, .06), 0 10px 24px rgba(0, 0, 0, .55); }
-  body.nightly .card .name, body.nightly .opt .label, body.nightly .centre h1 { font-family: var(--font-display); font-weight: 700; }
-  body.nightly .card .name { font-size: 14.5px; color: var(--gold-hi); text-shadow: 0 1px 1px #000; }
-  body.nightly .pill, body.nightly button.update, body.nightly button.chip-btn { font-family: var(--font-mark); letter-spacing: .08em; text-transform: uppercase;
-    font-size: 11px; font-weight: 700; padding: 3px 11px; background: rgba(0, 0, 0, .55); }
-  /* capitals have no descenders: trim the line box to the capitals so the word sits in the middle of its pill */
-  @supports (text-box: trim-both cap alphabetic) {
-    body.nightly .pill, body.nightly button.update, body.nightly button.chip-btn { line-height: 1; padding: 7px 11px 6px; text-box: trim-both cap alphabetic; } }
-  body.nightly .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
-  body.nightly .pill.wait { color: var(--wait); border-color: color-mix(in srgb, var(--wait) 50%, transparent); }
-  body.nightly .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
-  body.nightly button.update, body.nightly button.chip-btn, body.nightly .opt > div > button:not(.link) {
-    background: linear-gradient(180deg, #181818, #0a0a0a); color: var(--gold); border-color: var(--gold-soft); }
-  body.nightly button.update:hover, body.nightly button.chip-btn:hover, body.nightly .opt > div > button:not(.link):hover {
-    background: linear-gradient(180deg, var(--red-hi), var(--red-lo)); color: #ffe2a0; border-color: #d0a851; }
-  body.nightly button.primary { font-family: var(--font-display); font-weight: 700; letter-spacing: .02em; color: #ffe2a0; text-shadow: 0 1px 1px #000;
-    background: linear-gradient(180deg, var(--red-hi) 0%, var(--red) 45%, var(--red-lo) 100%); border: 1px solid #d0a851; border-radius: 7px;
-    box-shadow: 0 0 0 1px #000, inset 0 1px 0 rgba(255, 190, 150, .38), inset 0 -8px 12px -6px rgba(0, 0, 0, .55); }
-  body.nightly button.primary:hover { filter: brightness(1.22); border-color: var(--gold-hi); }
-  /* Update now is the window's one call to act: the raid roster's red button with its gold rim, at pill size. */
-  body.nightly button.update, body.nightly button.update:hover { font-family: var(--font-display); font-size: 12.5px; font-weight: 700; letter-spacing: .02em;
-    text-transform: none; line-height: 1.2; padding: 5px 13px; border-radius: 7px; color: #ffe2a0; text-shadow: 0 1px 1px #000; text-box: normal;
-    background: linear-gradient(180deg, var(--red-hi) 0%, var(--red) 45%, var(--red-lo) 100%); border: 1px solid #d0a851;
-    box-shadow: 0 0 0 1px #000, inset 0 1px 0 rgba(255, 190, 150, .38), inset 0 -8px 12px -6px rgba(0, 0, 0, .55), 0 3px 8px rgba(0, 0, 0, .45); }
-  body.nightly button.update:hover { filter: brightness(1.22); border-color: var(--gold-hi); }
-  body.nightly .switch { background: #070707; box-shadow: inset 0 2px 5px rgba(0, 0, 0, .7); }
-  body.nightly .switch button[aria-checked="true"] { background: linear-gradient(180deg, #f7dc93, #c79a3d); }
-  body.nightly .switch button.night[aria-checked="true"] { background: color-mix(in srgb, var(--night) 24%, #070707); }
-  body.nightly .nightly-tag { text-shadow: 0 0 8px rgba(184, 102, 240, .35); }
-  body.nightly .bar { background: #050505; box-shadow: inset 0 1px 2px #000; }
-  body.nightly .bar > div { background: linear-gradient(180deg, #f8e2a4, #c1933a); }
-  body.nightly .opts { gap: 8px; }
-  body.nightly .opt { padding: 8px 12px; border-radius: 10px; background: rgba(9, 9, 9, .85); border: 1px solid var(--line); }
-  body.nightly .news { text-shadow: 0 0 3px #000, 0 0 6px #000, 0 1px 1px #000; }   /* a dark halo keeps stars off the letters */
-  body.nightly .news h2 { font-family: var(--font-mark); font-size: 11.5px; }
 </style>
 </head>
 <body>
@@ -197,9 +185,13 @@
 <div class="app" id="app"></div>
 <script>
 let last = "", view = "main";
+let shown = "";         // the view the page's body was last drawn for: a redraw of the same one keeps the reader's place
+let problem = "";       // why the last click did nothing (failed), said under the top bar
 // A white half moon before the word Nightly, drawn for XPCompass.
 const MOON = `<svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M7.28 1.44A6.6 6.6 0 1 0 14.32 9.89A5.6 5.6 0 0 1 7.28 1.44Z" fill="#fff"/></svg>`;
 const NIGHTLY = `<span class="nightly-tag">${MOON}Nightly</span>`;
+// The word Stable in gold, where a card holding Nightly says Nightly.
+const STABLE = `<span class="stable-tag">Stable</span>`;
 // Each game's badge, drawn for XPCompass (not Blizzard's logos), pinned to the corner of its app's mark.
 const BADGES = {
   "WoW Forever": `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#8a6a3a" stroke="#d8b45a" stroke-width="1"/>
@@ -256,7 +248,7 @@ function card(a, s) {
   const pct = a.progress == null ? null : Math.round(a.progress * 100);
   return `<div class="card">
     <div class="top">${mark(a, s)}
-      <div class="grow"><div class="name">${esc(a.name)}</div><div class="sub">${appLine(a)}${a.testing ? ` · ${NIGHTLY}` : ""}</div></div>
+      <div class="grow"><div class="name">${esc(a.name)}</div><div class="sub">${appLine(a)} · ${a.testing ? NIGHTLY : STABLE}</div></div>
       ${pill(a)}</div>
     ${busy ? `<div class="progress"><div class="bar ${pct == null ? "busy" : ""}"><div style="width:${pct || 0}%"></div></div>
       <div class="small"><span>${a.state === "installing" ? "Installing…" : "Downloading…"}</span><span>${pct == null ? "" : pct + "%"}</span></div></div>` : ""}
@@ -400,14 +392,22 @@ function waiting() {
   </div></div>`;
 }
 
+const trouble = () => problem ? `<div class="problem" role="alert"><span class="grow">That didn't work: ${esc(problem)}</span>
+    <button class="link" data-ok>OK</button></div>` : "";       // the page's own button: every data-act is a call the app has
+
 function render(s) {
   const body = s.signin.busy ? waiting() : s.welcome ? welcome(s) : view === "options" ? options(s) : view === "about" ? about(s) : mainView(s);
+  // Both builds share the black look; Nightly adds its purple and, alone, the sky. Stable never has one.
   document.body.classList.toggle("nightly", s.channel === "nightly");
   sky.set(s.channel === "nightly");
-  const before = document.querySelector("main"), kept = before && before.dataset.view === view ? before.scrollTop : 0;
-  document.getElementById("app").innerHTML = header(s) + body;
+  // A redraw keeps the reader's place. Which view the body shows is kept here in `shown`, never on the body as a
+  // `data-view`: that is what a button names to go to a view, and from 12 to 18 November the body carrying one made
+  // every click inside it a change of view, so no button in it reached the app (tests/test_app_window_clicks.py).
+  const before = document.querySelector("main"), kept = before && shown === view ? before.scrollTop : 0;
+  document.getElementById("app").innerHTML = header(s) + trouble() + body;
   const page = document.querySelector("main");
-  if (page) { page.dataset.view = view; page.scrollTop = kept; fade(page); }    // a redraw keeps the reader's place
+  shown = page ? view : "";
+  if (page) { page.scrollTop = kept; fade(page); }
 }
 // The window's body fades out at an edge while there is more to scroll to that way.
 const fade = page => {
@@ -515,17 +515,35 @@ async function refresh() {
   } catch (e) { /* the app is busy; try again next tick */ }
 }
 
+// A click that did nothing says why: the reason stays under the top bar until OK or the next click that works.
+function failed(why) {
+  problem = String((why && (why.error || why.message)) || why || "the app gave no reason");
+  last = ""; refresh();
+}
+// Ask the app to do what a button says (window.Api). It answers nothing when it worked, {error} when it refused or
+// broke, and the call itself fails when the app can't be reached.
+function ask(act, args) {
+  const api = window.pywebview && window.pywebview.api, call = api && api[act];
+  if (typeof call !== "function") return failed("the app isn't answering. Quit XPCompass from its tray icon and open it again.");
+  let answer;
+  try { answer = call.apply(api, args); } catch (error) { return failed(error); }
+  Promise.resolve(answer).then(result => {
+    if (result && result.error) return failed(result.error);
+    if (problem) { problem = ""; last = ""; }
+    refresh();
+  }, failed);
+}
+
 document.addEventListener("click", e => {
-  const tab = e.target.closest("[data-view]");
-  if (tab) { view = tab.dataset.view; last = ""; refresh(); return; }
-  const el = e.target.closest("[data-act]");
+  // The nearest button under the pointer decides: one that acts, one that goes to another view, or the OK that puts
+  // a problem's line away. Only a button names a view to go to, never the page's body, which holds every other button.
+  const el = e.target.closest("[data-act], button[data-view], button[data-ok]");
   if (!el) return;
-  const act = el.dataset.act;
-  if (act === "set_wanted") window.pywebview.api.set_wanted(el.dataset.id, el.dataset.on === "1");
-  else if (act === "update_now") window.pywebview.api.update_now(el.dataset.id);
-  else if (act === "toggle_start") window.pywebview.api.toggle_start(el.checked);
-  else if (act === "toggle_data") window.pywebview.api.toggle_data(el.checked);
-  else window.pywebview.api[act](...(el.dataset.id ? [el.dataset.id] : []));
+  if (el.dataset.ok !== undefined) { problem = ""; last = ""; refresh(); return; }
+  if (el.dataset.act === undefined) { view = el.dataset.view; last = ""; refresh(); return; }
+  const act = el.dataset.act, id = el.dataset.id;
+  ask(act, act === "set_wanted" ? [id, el.dataset.on === "1"]
+         : act === "toggle_start" || act === "toggle_data" ? [el.checked] : id ? [id] : []);
   setTimeout(refresh, 150);
 });
 // A press on a button in the top bar is a click, never the start of dragging the window.

@@ -75,6 +75,16 @@ def npc_of(guid):
     return None
 
 
+def hit(fields):
+    """(amount, whether it crit) of a damage line. The game ends one: amount, base amount, overkill, school, resisted,
+    blocked, absorbed, critical, glancing, crushing. Forever's client then adds a reach tag to a spell's or a shot's
+    ("ST" one target, "AOE"), and none to a swing's, so the tag is stepped over before counting back from the end.
+    Read without that step, every spell's damage was its base amount (before armor, resists and the crit) and no
+    spell ever crit: 10,595 rows from 9 to 16 November carry both faults; swings, counts and times were right."""
+    tail = fields[:-1] if fields[-1].isalpha() and fields[-1] != "nil" else fields
+    return int(tail[-10]), tail[-3] not in ("nil", "", "0")
+
+
 def spell_name(event, fields):
     if event.startswith("SWING"):
         return "Melee"
@@ -133,12 +143,11 @@ class Reader:
         if at is None:
             return
         self.kept.append(raw)
-        if event in DAMAGE and len(f) >= 10:
+        if event in DAMAGE and len(f) >= 11:
             try:
-                amount = int(f[-10])
+                amount, crit = hit(f)
             except ValueError:
                 return
-            crit = f[-3] not in ("nil", "", "0")
             if mine_src or pet_src:
                 fight = self._touch(at)
                 npc = npc_of(dst)

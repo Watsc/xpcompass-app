@@ -13,6 +13,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -32,6 +33,9 @@ OLD_SERVER = re.compile(r"^https://[a-z0-9-]+\.[a-z0-9-]+\.ts\.net(?=/|$)")
 TARGET = "ForeverCoachCompanion/session"       # the Credential Manager entry
 REFRESH_WITHIN = 6 * 3600
 SIGN_IN_TIMEOUT = 10 * 60
+# One renewal at a time. The server retires the old token as it gives the new one, so a second renewal sent with
+# the old token is refused, and that refusal used to forget the sign-in the first had just saved.
+RENEWING = threading.RLock()
 
 REFUSED = {
     "access_denied": "Sign-in was cancelled on Discord's page.",
@@ -118,7 +122,7 @@ class Account:
             return None
         if session["expires_at"] - self.now() < REFRESH_WITHIN:
             try:
-                session = self.refresh()
+                session = self.refresh(seen=session["token"])
             except AuthError as error:
                 if error.code != "discord_unavailable":
                     raise
@@ -141,7 +145,9 @@ class Account:
                 body = ("<!doctype html><meta charset=utf-8><title>XPCompass</title>"
                         "<p style='font:16px sans-serif'>"
                         + ("Signed in. You can close this tab." if "token" in query
-                           else "Sign-in did not finish. You can close this tab.") + "</p>").encode()
+                           else "Sign-in did not finish. You can close this tab.") + "</p>"
+                        # Closes the tab where the browser allows it (it does when no page in it was clicked on).
+                        + ("<script>window.close()</script>" if "token" in query else "")).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -172,23 +178,27 @@ class Account:
         self.store.save(session)
         return self._remember_name(session)
 
-    def refresh(self):
-        """Swap the token for a new one, which re-checks the player's roles on the server."""
-        session = self.session()
-        if not session:
-            raise AuthError("signin_required")
-        status, body = self.call("POST", "/auth/refresh", session["token"])
-        if status == 200:
-            fresh = {"token": body["token"], "expires_at": int(body["expires_at"]),
-                     "name": body.get("display_name") or body.get("username") or session.get("name"),
-                     "prerelease": bool(body.get("prerelease")), "roles": sorted(body.get("roles") or []),
-                     "account_id": body.get("discord_id") or session.get("account_id")}
-            self.store.save(fresh)
-            return fresh
-        code = body.get("error", f"http_{status}")
-        if status in (401, 403):
-            self.store.clear()
-        raise AuthError(code, REFUSED.get(code) or body.get("message"))
+    def refresh(self, seen=None):
+        """Swap the token for a new one, which re-checks the player's roles on the server. `seen` is the token the
+        caller found too old: when another part of the app renewed it meanwhile, that newer sign-in is the answer."""
+        with RENEWING:
+            session = self.session()
+            if not session:
+                raise AuthError("signin_required")
+            if seen and session["token"] != seen:
+                return session
+            status, body = self.call("POST", "/auth/refresh", session["token"])
+            if status == 200:
+                fresh = {"token": body["token"], "expires_at": int(body["expires_at"]),
+                         "name": body.get("display_name") or body.get("username") or session.get("name"),
+                         "prerelease": bool(body.get("prerelease")), "roles": sorted(body.get("roles") or []),
+                         "account_id": body.get("discord_id") or session.get("account_id")}
+                self.store.save(fresh)
+                return fresh
+            code = body.get("error", f"http_{status}")
+            if status in (401, 403) and (self.session() or {}).get("token") == session["token"]:
+                self.store.clear()      # only the sign-in that was refused, never one saved since
+            raise AuthError(code, REFUSED.get(code) or body.get("message"))
 
     def sign_out(self):
         session = self.session()

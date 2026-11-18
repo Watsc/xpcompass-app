@@ -8,8 +8,10 @@ Closing the window hides it; the app keeps running in the tray until Quit.
 """
 import base64
 import io
+import logging
 import sys
 import time
+import traceback
 import webbrowser
 from pathlib import Path
 
@@ -41,10 +43,18 @@ def data_uri(image):
 
 
 def _acts(method):
-    """A call the player made by clicking: the app notes when, so it knows the window is in use (tray.safe_to_switch)."""
+    """A call the player made by clicking: the app notes when, so it knows the window is in use (tray.safe_to_switch),
+    and the page is told why when the click did nothing. An error inside the call, or the reason the app gives for
+    refusing (a string), goes back as {"error": reason}, which ui.html says under the top bar; a call that worked
+    gives None."""
     def wrapped(self, *args, **kwargs):
         self._app.touched = time.time()
-        return method(self, *args, **kwargs)
+        try:
+            refused = method(self, *args, **kwargs)
+        except Exception as error:   # noqa: BLE001 - a click never fails without the window saying why
+            logging.getLogger("pywebview").error(traceback.format_exc())
+            return {"error": str(error) or type(error).__name__}
+        return {"error": refused} if refused and isinstance(refused, str) else None
     wrapped.__name__ = method.__name__
     return wrapped
 
@@ -100,7 +110,8 @@ class Api:
     def pick_game(self, game_id="forever"):
         chosen = self._app.window.create_file_dialog(webview.FOLDER_DIALOG)
         if chosen:
-            self._app.set_game(chosen[0], str(game_id))
+            return self._app.set_game(chosen[0], str(game_id))      # why the folder was refused, or None
+        return None
 
     @_acts
     def use_found_client(self, game_id):
@@ -128,7 +139,7 @@ class Api:
 
     @_acts
     def set_channel(self, channel):
-        self._app.set_channel(str(channel))
+        return self._app.set_channel(str(channel))                  # why it didn't switch, or None
 
     @_acts
     def toggle_start(self, on):

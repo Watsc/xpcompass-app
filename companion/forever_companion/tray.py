@@ -378,12 +378,13 @@ class Tray:
             self.wake.set()
 
     def set_channel(self, channel):
-        """A channel change covers both the companion and every addon; never forces a running-game swap."""
+        """A channel change covers both the companion and every addon; never forces a running-game swap.
+        Returns why it didn't switch, which the window says (window.Api), or None when it did."""
         from .channels import canonical
         wanted = canonical(channel)
         session = self.account.session() or {}
         if wanted == "nightly" and not session.get("prerelease"):
-            return
+            return "Nightly isn't open to this account."
         self.settings.channel, self.settings.channel_migrated = wanted, True
         self.settings.app_switch_to = wanted
         self.settings.save()
