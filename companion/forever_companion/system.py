@@ -38,6 +38,21 @@ def bundled(name, dev_path):
     return Path(sys._MEIPASS) / name if packaged() else Path(dev_path)
 
 
+# XPCompass has two pictures (tools/make_logo.py draws both, and says why they are two). The brand logo, the gold
+# star, is for inside the window: its header, the addon cards, the sign-in page. The app icon, the leather tile, is
+# for outside it: the taskbar button, the tray or menu bar, the Dock. ICON_SMALL is the tile without its letters,
+# for sizes under 24 px, where they can't be read.
+BRANDING = Path(__file__).resolve().parents[2] / "assets" / "branding"       # where they are when run from source
+LOGO = "XPCompassLogo-256.png"
+ICON = "XPCompassIcon-256.png"
+ICON_SMALL = "XPCompassIcon-small.png"
+
+
+def branding(name):
+    """One of the pictures above: packed with the built app, or in the checkout when run from source."""
+    return bundled(name, BRANDING / name)
+
+
 def mac_bundle():
     """The running "XPCompass.app", when packaged on a Mac."""
     return Path(sys.executable).resolve().parents[2] if MAC and packaged() else None
@@ -77,6 +92,44 @@ def mac_notify(title, text):
     """macOS notification through AppleScript (pystray cannot notify on a Mac). Inputs are quoted."""
     script = f"display notification {json.dumps(text)} with title {json.dumps(title)}"
     subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+# --- The window's icon ------------------------------------------------------------------------------
+
+_icons = {}     # (file, ICON_BIG or ICON_SMALL) -> the loaded icon: loaded once, kept while the app lives
+
+
+def set_window_icon(hwnd, path):
+    """Windows: give the window `hwnd` the icon in the .ico file `path`, big and small, each at the size this
+    display asks for. The taskbar button and Alt+Tab show the big one. Without this they show the icon of the
+    .exe that owns the window, which is the fixed launcher's and changes only with a new setup. True when both
+    were set; a window that keeps its old icon is never worth stopping the app for, so nothing is raised.
+    The message is posted, not sent: the window's own thread takes it, and the caller (the tray's) never waits."""
+    if not WINDOWS or not hwnd or not path:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user = ctypes.WinDLL("user32")              # our own copy: the tray's library sets its own types on the shared one
+        user.LoadImageW.restype = wintypes.HANDLE
+        user.LoadImageW.argtypes = (wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int, ctypes.c_int,
+                                    wintypes.UINT)
+        user.PostMessageW.restype = wintypes.BOOL
+        user.PostMessageW.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+        done = True
+        # (WM_SETICON's ICON_BIG or ICON_SMALL, the system's width and height for it: SM_CXICON.., SM_CXSMICON..)
+        for which, across, down in ((1, 11, 12), (0, 49, 50)):
+            icon = _icons.get((str(path), which))
+            if not icon:
+                icon = user.LoadImageW(None, str(path), 1, user.GetSystemMetrics(across), user.GetSystemMetrics(down),
+                                       0x10)          # IMAGE_ICON, LR_LOADFROMFILE
+                if icon:
+                    _icons[(str(path), which)] = icon
+            if not icon or not user.PostMessageW(hwnd, 0x80, which, icon):      # WM_SETICON
+                done = False
+        return done
+    except Exception:   # noqa: BLE001 - the icon is never worth stopping the app for
+        return False
 
 
 # --- Starting at login -----------------------------------------------------------------------------

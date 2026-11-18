@@ -22,7 +22,6 @@ from . import level_medians
 
 QUIET = 300          # seconds with no click in an open window before a waiting code update switches anyway
 
-LOGO = Path(__file__).resolve().parents[2] / "assets" / "branding" / "XPCompassLogo-256.png"
 FOLDER_HINT = {"forever": "_forever_", "era": "_classic_era_"}      # for the message about a wrong folder
 
 # Kept under their old names for the rest of the app and the tests.
@@ -31,13 +30,23 @@ set_start_with_windows = system.set_start_at_login
 single_instance = system.single_instance
 
 
-def icon_image():
+def _picture(name):
     try:
-        return Image.open(system.bundled(LOGO.name, LOGO)).convert("RGBA")
+        return Image.open(system.branding(name)).convert("RGBA")
     except OSError:
         image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         ImageDraw.Draw(image).ellipse((4, 4, 60, 60), fill=(212, 175, 55, 255))
         return image
+
+
+def logo_image():
+    """The brand logo, the gold star: everything inside the window (its header, the cards, the sign-in page)."""
+    return _picture(system.LOGO)
+
+
+def icon_image():
+    """The app's icon, the leather tile: the tray or menu bar. The taskbar's is window.icon_file's, the same tile."""
+    return _picture(system.ICON)
 
 
 def start_with_windows_by_default(settings, packaged, setter=None):
@@ -77,7 +86,7 @@ class Tray:
         self.cancel = threading.Event()
         self.app_update = None          # {"state", "progress"} while the app replaces itself
         self.held_back = None           # the app build whose failed install was last reported
-        self.logo = window.data_uri(icon_image())
+        self.logo = window.data_uri(logo_image())
         self.crest = window.data_uri(Image.open(system.bundled("onlybans-crest.png", Path(__file__).parent / "onlybans-crest.png")))
         self.icon = pystray.Icon("ForeverCoachCompanion", icon_image(), "XPCompass", menu=pystray.Menu(
             pystray.MenuItem("Open XPCompass", lambda: self.window.show(), default=True),
@@ -98,7 +107,7 @@ class Tray:
         self.icon.run_detached()
         if self.updated:
             threading.Timer(3, self.say_updated).start()   # once the icon is up to carry it
-        window.Window.run()
+        window.Window.run(self.window.icon if self.window else None)
 
     def window_closed(self):
         """The window went to the tray: a code update waiting for that switches now."""
@@ -447,10 +456,29 @@ def end_after(wait, end=None):
     threading.Thread(target=run, name="quit-guard", daemon=True).start()
 
 
+def packed(name):
+    """Whether one of the app's pictures came with it and opens."""
+    try:
+        return system.branding(name).is_file() and Image.open(system.branding(name)).size[0] > 1
+    except OSError:
+        return False
+
+
+def taskbar_icon_makes():
+    """Whether the window's icon can be made from the packed pictures, on the libraries this app runs on."""
+    try:
+        data = window.icon_bytes(Image.open(system.branding(system.ICON)), Image.open(system.branding(system.ICON_SMALL)))
+    except Exception:   # noqa: BLE001 - whatever the reason, the self-test says no
+        return False
+    return len(data) > 1000
+
+
 def selftest(out):
     """For tools/pack_companion.py: prove the packaged .exe has its modules and files, then exit."""
     import json
-    report = {"build": selfupdate.current(), "page": len(window.page()), "logo": icon_image().size[0] > 1,
+    report = {"build": selfupdate.current(), "page": len(window.page()),
+              "logo": packed(system.LOGO),                                      # the star, for inside the window
+              "icon": packed(system.ICON) and packed(system.ICON_SMALL) and taskbar_icon_makes(),    # the tile, outside
               "keys": len(TRUSTED_KEYS),
               "frozen": system.packaged()}
     Path(out).write_text(json.dumps(report), encoding="utf-8")

@@ -23,16 +23,18 @@ def main():
         from PIL import Image
         icon = HERE / "build" / "icon.icns"
         icon.parent.mkdir(exist_ok=True)
-        Image.open(BRANDING / "XPCompassLogo-1024.png").convert("RGBA").resize((512, 512)).save(icon)
+        Image.open(BRANDING / "XPCompassIcon-1024.png").convert("RGBA").resize((512, 512)).save(icon)
     hidden = ["pystray._darwin", "keyring.backends.macOS"] if MAC else ["pystray._win32"]
     ui = APP / "forever_companion" / "ui.html"
     crest = APP / "forever_companion" / "onlybans-crest.png"
-    logo = BRANDING / "XPCompassLogo-256.png"
+    # The star goes inside the window, the leather tile (the .exe's icon, the Dock's, the taskbar's) outside it.
+    pictures = [BRANDING / name for name in ("XPCompassLogo-256.png", "XPCompassIcon-256.png", "XPCompassIcon-small.png")]
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--windowed", "--name", "XPCompass",
                     "--icon", str(icon), "--distpath", str(HERE / "dist"), "--workpath", str(HERE / "build"),
                     "--specpath", str(HERE / "build"), "--paths", str(APP),
                     *[arg for name in hidden for arg in ("--hidden-import", name)],
-                    "--add-data", f"{ui}{sep}forever_companion", "--add-data", f"{logo}{sep}.",
+                    "--add-data", f"{ui}{sep}forever_companion",
+                    *[arg for picture in pictures for arg in ("--add-data", f"{picture}{sep}.")],
                     "--add-data", f"{crest}{sep}.", str(APP / "ForeverCompanion.pyw")], cwd=HERE, check=True)
     print("built", HERE / "dist" / ("XPCompass.app" if MAC else "XPCompass"))
     return 0

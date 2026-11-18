@@ -9,6 +9,7 @@ Closing the window hides it; the app keeps running in the tray until Quit.
 import base64
 import io
 import logging
+import struct
 import sys
 import time
 import traceback
@@ -16,6 +17,7 @@ import webbrowser
 from pathlib import Path
 
 import webview
+from PIL import Image
 
 from . import system
 
@@ -40,6 +42,54 @@ def data_uri(image):
     buffer = io.BytesIO()
     image.convert("RGBA").resize((128, 128)).save(buffer, "PNG")
     return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+# The window's icon on Windows. The taskbar button and Alt+Tab show a window's own icon, and a window that has none
+# gets the .exe's: the fixed launcher's, which an update never replaces. So the app makes an .ico of its icon from
+# the two pictures packed with its code and gives it to its window, and an ordinary update changes what the taskbar
+# shows. (The pictures travel as .png: apps refuse a code update holding any other kind of file,
+# release.CODE_SUFFIXES.) Sizes are what Windows asks for at each display scaling, 100% to 250%.
+ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128)
+LETTERS_FROM = 24           # below this the icon's letters can't be read, so the drawing without them is used
+ICON_FILE = "XPCompass.ico"
+
+
+def icon_frame(image):
+    """One picture of an .ico: an uncompressed 32-bit bitmap, the kind every reader of the format takes."""
+    side = image.width
+    pixels = image.transpose(Image.Transpose.FLIP_TOP_BOTTOM).tobytes("raw", "BGRA")    # rows from the bottom up
+    mask = bytes(((side + 31) // 32) * 4 * side)                                   # all clear: the alpha decides
+    return struct.pack("<IiiHHIIiiII", 40, side, side * 2, 1, 32, 0, len(pixels) + len(mask), 0, 0, 0, 0) + pixels + mask
+
+
+def icon_bytes(big, small, sizes=ICON_SIZES):
+    """The app's icon as an .ico file's bytes: `big` (with its letters) scaled to each size from LETTERS_FROM up,
+    `small` (without them) to each size below."""
+    frames = []
+    for side in sizes:
+        source = big if side >= LETTERS_FROM else small
+        frames.append((side, icon_frame(source.convert("RGBA").resize((side, side), Image.LANCZOS))))
+    out, at = struct.pack("<HHH", 0, 1, len(frames)), 6 + 16 * len(frames)
+    for side, frame in frames:
+        out += struct.pack("<BBBBHHII", side % 256, side % 256, 0, 0, 1, 32, len(frame), at)
+        at += len(frame)
+    return out + b"".join(frame for _, frame in frames)
+
+
+def icon_file(folder=None):
+    """Windows: the app's icon as an .ico in the app's data folder, written when it isn't there or isn't today's.
+    None anywhere else, and when it can't be made (the window then keeps the launcher's icon)."""
+    if not system.WINDOWS:
+        return None
+    try:
+        data = icon_bytes(Image.open(system.branding(system.ICON)), Image.open(system.branding(system.ICON_SMALL)))
+        path = Path(folder or system.data_dir()) / ICON_FILE
+        if not path.is_file() or path.read_bytes() != data:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        return path
+    except Exception:   # noqa: BLE001 - the icon is never worth stopping the app for
+        return None
 
 
 def _acts(method):
@@ -158,7 +208,28 @@ class Window:
                                             min_size=(360, 420), hidden=not show, background_color="#14110d",
                                             frameless=self.frameless, easy_drag=False, shadow=True)
         self.native.events.closing += self._closing
+        self.icon = icon_file()                         # Windows: what the taskbar button shows
+        if self.icon:
+            for name in ("before_show", "shown"):       # once it exists, before it is first seen; and when it is
+                event = getattr(self.native.events, name, None)
+                if event is not None:
+                    event += self._dressed
         self.visible = bool(show)
+
+    def handle(self):
+        """Windows' handle of the window, once it exists; else None."""
+        try:
+            return int(self.native.native.Handle.ToInt64())
+        except Exception:   # noqa: BLE001 - not made yet, or not a Windows window
+            return None
+
+    def dress(self):
+        """Give the window the app's icon (system.set_window_icon). Asked again each time the window is opened from
+        the tray: it costs nothing, and the window's own library set the launcher's icon when it made the window."""
+        return bool(self.icon) and system.set_window_icon(self.handle(), self.icon)
+
+    def _dressed(self):
+        self.dress()            # an event's answer means something to the window's library; this one has none
 
     def _closing(self):
         if self.app.stopping:
@@ -181,6 +252,7 @@ class Window:
         self.native.show()
         self.native.restore()
         self.visible = True
+        self.dress()
 
     def create_file_dialog(self, kind):
         return self.native.create_file_dialog(kind)
@@ -189,5 +261,21 @@ class Window:
         self.native.destroy()
 
     @staticmethod
-    def run():
-        webview.start()         # blocks on the main thread until the window is destroyed
+    def run(icon=None):
+        """Blocks on the main thread until the window is destroyed. `icon` (Windows, an .ico) is what the window's
+        library gives each window it makes, in place of the launcher's, so the two never disagree."""
+        webview.start(**start_options(icon))
+
+
+def start_options(icon, start=None):
+    """webview.start's options for `icon`: none when there is no icon, or when the window library the launcher
+    froze is older than its `icon` option (a fixed launcher keeps its libraries, and an option it doesn't know
+    would stop the app from opening at all). WM_SETICON (Window.dress) covers the window either way."""
+    import inspect
+    if not icon or not Path(icon).is_file():
+        return {}
+    try:
+        known = "icon" in inspect.signature(start or webview.start).parameters
+    except (TypeError, ValueError):
+        known = False
+    return {"icon": str(icon)} if known else {}
